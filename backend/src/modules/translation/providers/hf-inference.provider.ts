@@ -7,7 +7,7 @@ import {
   TranslationProviderError,
 } from '../interfaces/translation-errors';
 
-const HF_ENDPOINT =
+const DEFAULT_ENDPOINT =
   'https://api-inference.huggingface.co/models/plxgplxg/nllb-zh-vi-merged';
 const MAX_BATCH_SIZE = 8;
 
@@ -15,9 +15,13 @@ const MAX_BATCH_SIZE = 8;
 export class HFInferenceProvider implements ITranslationProvider {
   constructor(private readonly configService: ConfigService) {}
 
+  private getEndpoint(): string {
+    return this.configService.get<string>('HF_ENDPOINT', DEFAULT_ENDPOINT);
+  }
+
   async translate(text: string, _sourceLang: string, _targetLang: string): Promise<string> {
     const token = this.configService.get<string>('HF_TOKEN');
-    const res = await fetch(HF_ENDPOINT, {
+    const res = await fetch(this.getEndpoint(), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
