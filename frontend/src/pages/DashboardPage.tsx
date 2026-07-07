@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchBooks, startTranslation } from '../api';
 import { Link } from 'react-router-dom';
-import { Play, RotateCw, BookOpen, AlertCircle } from 'lucide-react';
+import { Play, RotateCw, BookOpen, AlertCircle, Plus } from 'lucide-react';
 import type { Book } from '../store'; // Just for types
 
 const DashboardPage = () => {
@@ -68,13 +68,13 @@ const DashboardPage = () => {
 
                 <div style={{ marginTop: '1.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   {book.status === 'draft' && (
-                    <button 
-                      onClick={() => translateMutation.mutate(book.id)} 
-                      className="btn btn-secondary" 
+                    <button
+                      onClick={() => translateMutation.mutate(book.id)}
+                      className="btn btn-secondary"
                       style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
                       disabled={translateMutation.isPending}
                     >
-                      {translateMutation.isPending ? <RotateCw size={16} className="spin" /> : <Play size={16} />} 
+                      {translateMutation.isPending ? <RotateCw size={16} className="spin" /> : <Play size={16} />}
                       Start Translation
                     </button>
                   )}
@@ -88,6 +88,13 @@ const DashboardPage = () => {
                       <RotateCw size={16} className="spin" /> Translating...
                     </button>
                   )}
+                  <Link
+                    to={`/upload?bookId=${book.id}`}
+                    className="btn btn-secondary"
+                    style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}
+                  >
+                    <Plus size={16} /> Thêm chương
+                  </Link>
                 </div>
 
                 <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>

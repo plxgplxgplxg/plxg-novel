@@ -9,9 +9,11 @@ import {
   UseInterceptors,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthGuard } from '@nestjs/passport';
+import * as mammoth from 'mammoth';
 import { ChapterService } from './chapter.service';
 import { CreateChapterDto } from './dto/create-chapter.dto';
 import { CurrentUser } from '../shared/decorators/current-user.decorator';
@@ -38,7 +40,18 @@ export class ChapterController {
     @CurrentUser() user: JwtPayload,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    const content = file.buffer.toString('utf-8');
+    const originalName = file.originalname.toLowerCase();
+    let content: string;
+
+    if (originalName.endsWith('.docx')) {
+      const result = await mammoth.extractRawText({ buffer: file.buffer });
+      content = result.value;
+    } else if (originalName.endsWith('.txt')) {
+      content = file.buffer.toString('utf-8');
+    } else {
+      throw new BadRequestException('Only .txt and .docx files are supported');
+    }
+
     return this.chapterService.uploadAndSplitChapters(bookId, user.sub, content);
   }
 

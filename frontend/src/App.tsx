@@ -23,7 +23,7 @@ function App() {
       <Router basename="/plxg-novel">
         <div className="app-container">
           <header className="header">
-            <h1>Zh-Vi Translator</h1>
+            <h1>Plxg Novel</h1>
             <nav className="nav-links">
               <NavLink 
                 to="/" 
