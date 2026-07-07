@@ -3,3 +3,10 @@ backend/dist/
 backend/.env
 backend/coverage/
 .DS_Store
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.local
+frontend/*.log
