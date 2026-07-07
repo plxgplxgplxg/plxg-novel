@@ -19,9 +19,15 @@ import {
   MAX_RETRY_ATTEMPTS,
   SPLIT_WORKER_CONCURRENCY,
 } from '../../../queue/queue.constants';
+import {
+  TranslationJob,
+  JobStatus,
+} from '../../../database/entities/translation-job.entity';
 
 export interface ChapterSplitJobPayload {
   chapterId: string;
+  bookJobId?: string;
+  chapterJobId?: string;
 }
 
 @Processor(QUEUE_CHAPTER_SPLIT, { concurrency: SPLIT_WORKER_CONCURRENCY })
@@ -33,6 +39,8 @@ export class ChapterSplitWorker extends WorkerHost {
     private readonly chapterRepo: Repository<Chapter>,
     @InjectRepository(Segment)
     private readonly segmentRepo: Repository<Segment>,
+    @InjectRepository(TranslationJob)
+    private readonly jobRepo: Repository<TranslationJob>,
     @Inject(CHUNKER)
     private readonly chunker: { chunk: IChunker['chunk'] },
     @InjectQueue(QUEUE_TRANSLATION)
@@ -42,7 +50,7 @@ export class ChapterSplitWorker extends WorkerHost {
   }
 
   async process(job: Job<ChapterSplitJobPayload>): Promise<void> {
-    const { chapterId } = job.data;
+    const { chapterId, bookJobId, chapterJobId } = job.data;
 
     const chapter = await this.chapterRepo.findOne({
       where: { id: chapterId },
@@ -54,7 +62,17 @@ export class ChapterSplitWorker extends WorkerHost {
 
     await this.chapterRepo.update(chapterId, {
       status: ChapterStatus.SPLITTING,
+      totalSegments: 0,
+      completedSegments: 0,
+      translatedContent: undefined,
     });
+    await this.segmentRepo.delete({ chapterId });
+    if (chapterJobId) {
+      await this.jobRepo.update(chapterJobId, {
+        status: JobStatus.RUNNING,
+        progressPercent: 0,
+      });
+    }
 
     const rawSegments = this.chunker.chunk(chapter.rawContent);
 
@@ -75,7 +93,12 @@ export class ChapterSplitWorker extends WorkerHost {
 
     const translationJobs = savedSegments.map((seg) => ({
       name: 'translate-segment',
-      data: { segmentId: seg.id, chapterId },
+      data: {
+        segmentId: seg.id,
+        chapterId,
+        bookJobId,
+        chapterJobId,
+      },
       opts: {
         attempts: MAX_RETRY_ATTEMPTS,
         backoff: BULLMQ_BACKOFF_CONFIG,

@@ -1,9 +1,9 @@
 import { useState, useRef } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createBook, uploadChapters, fetchBooks, deleteBook } from '../api';
+import { createBook, uploadChapters, fetchBookOptions } from '../api';
 import { Upload, FileText, ChevronLeft, Plus, Trash2, BookOpen } from 'lucide-react';
-import type { Book } from '../store';
+import type { BookSummary } from '../store';
 
 type UploadMode = 'new' | 'existing';
 
@@ -32,9 +32,9 @@ const UploadPage = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const { data: books = [] } = useQuery<Book[]>({
-    queryKey: ['books'],
-    queryFn: fetchBooks,
+  const { data: books = [] } = useQuery<BookSummary[]>({
+    queryKey: ['book-options'],
+    queryFn: fetchBookOptions,
   });
 
   const createBookMutation = useMutation({
@@ -64,8 +64,6 @@ const UploadPage = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    let createdBookId: string | null = null;
-
     const filledSlots = slots.filter(s => s.file !== null);
     if (filledSlots.length === 0) {
       setError('Vui lòng chọn ít nhất một file chương.');
@@ -79,7 +77,6 @@ const UploadPage = () => {
         if (!title) { setError('Nhập tên truyện.'); return; }
         const book = await createBookMutation.mutateAsync({ title, originalTitle });
         bookId = book.id;
-        createdBookId = book.id;
       }
 
       for (const slot of filledSlots) {
@@ -87,17 +84,8 @@ const UploadPage = () => {
       }
 
       queryClient.invalidateQueries({ queryKey: ['books'] });
-      navigate('/');
+      navigate(`/books/${bookId}`);
     } catch (err: any) {
-      if (createdBookId) {
-        try {
-          await deleteBook(createdBookId);
-          queryClient.invalidateQueries({ queryKey: ['books'] });
-        } catch {
-          // Ignore cleanup failure and preserve original upload error.
-        }
-      }
-
       setError(err?.response?.data?.message || 'Upload thất bại. Kiểm tra backend logs.');
     }
   };
@@ -185,7 +173,7 @@ const UploadPage = () => {
                   style={{ cursor: 'pointer' }}
                 >
                   <option value="">-- Chọn truyện --</option>
-                  {books.map((b: Book) => (
+                  {books.map((b: BookSummary) => (
                     <option key={b.id} value={b.id}>{b.title}</option>
                   ))}
                 </select>
@@ -234,7 +222,7 @@ const UploadPage = () => {
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
           <Link to="/" className="btn btn-secondary">Hủy</Link>
           <button type="submit" className="btn" disabled={isPending}>
-            {isPending ? 'Đang upload...' : 'Upload và xử lý'}
+            {isPending ? 'Đang upload...' : 'Upload và tự động dịch'}
           </button>
         </div>
       </form>

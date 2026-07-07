@@ -1,5 +1,10 @@
 import { apiClient, API_URL } from './client';
-import type { Book, Chapter } from '../store';
+import type {
+  BookDetail,
+  BookSummary,
+  ChapterDetail,
+  PaginatedBooksResponse,
+} from '../store';
 
 export const login = async () => {
   try {
@@ -16,22 +21,26 @@ export const login = async () => {
   }
 };
 
-export const fetchBooks = async (): Promise<Book[]> => {
-  const res = await apiClient.get('/books');
-  const books = res.data;
-  // Fetch details for each book to get chapters array
-  const detailedBooks = await Promise.all(
-    books.map((b: any) => apiClient.get(`/books/${b.id}`).then(r => r.data))
-  );
-  return detailedBooks;
+export const fetchBooks = async (params?: {
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<PaginatedBooksResponse> => {
+  const res = await apiClient.get('/books', { params });
+  return res.data;
 };
 
-export const fetchBookDetails = async (id: string): Promise<Book> => {
+export const fetchBookOptions = async (): Promise<BookSummary[]> => {
+  const res = await fetchBooks({ page: 1, pageSize: 100 });
+  return res.items;
+};
+
+export const fetchBookDetails = async (id: string): Promise<BookDetail> => {
   const res = await apiClient.get(`/books/${id}`);
   return res.data;
 };
 
-export const createBook = async (title: string, originalTitle?: string): Promise<Book> => {
+export const createBook = async (title: string, originalTitle?: string): Promise<BookDetail> => {
   const res = await apiClient.post('/books', { title, originalTitle });
   return res.data;
 };
@@ -63,7 +72,7 @@ export const createBookProgressStreamUrl = (bookId: string) => {
   return url.toString();
 };
 
-export const fetchChapter = async (chapterId: string): Promise<Chapter> => {
+export const fetchChapter = async (chapterId: string): Promise<ChapterDetail> => {
   const res = await apiClient.get(`/chapters/${chapterId}`);
   return res.data;
 };

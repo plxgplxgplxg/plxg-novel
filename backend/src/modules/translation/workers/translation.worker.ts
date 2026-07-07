@@ -13,6 +13,10 @@ import {
   SegmentStatus,
 } from '../../../database/entities/segment.entity';
 import { Book, BookStatus } from '../../../database/entities/book.entity';
+import {
+  TranslationJob,
+  JobStatus,
+} from '../../../database/entities/translation-job.entity';
 import type { ITranslationProvider } from '../interfaces/translation-provider.interface';
 import { TRANSLATION_PROVIDER } from '../interfaces/translation-provider.interface';
 import {
@@ -29,6 +33,8 @@ import {
 export interface TranslationJobPayload {
   segmentId: string;
   chapterId: string;
+  bookJobId?: string;
+  chapterJobId?: string;
 }
 
 const PARAGRAPH_MARKER = '\n';
@@ -44,6 +50,8 @@ export class TranslationWorker extends WorkerHost {
     private readonly chapterRepo: Repository<Chapter>,
     @InjectRepository(Book)
     private readonly bookRepo: Repository<Book>,
+    @InjectRepository(TranslationJob)
+    private readonly jobRepo: Repository<TranslationJob>,
     @Inject(TRANSLATION_PROVIDER)
     private readonly translationProvider: {
       translate: ITranslationProvider['translate'];
@@ -55,7 +63,7 @@ export class TranslationWorker extends WorkerHost {
   }
 
   async process(job: Job<TranslationJobPayload>): Promise<void> {
-    const { segmentId, chapterId } = job.data;
+    const { segmentId, chapterId, bookJobId, chapterJobId } = job.data;
 
     const segment = await this.segmentRepo.findOne({
       where: { id: segmentId },
@@ -67,7 +75,7 @@ export class TranslationWorker extends WorkerHost {
         translatedText: PARAGRAPH_MARKER,
         status: SegmentStatus.DONE,
       });
-      await this.onSegmentCompleted(chapterId);
+      await this.onSegmentCompleted(chapterId, chapterJobId, bookJobId);
       return;
     }
 
@@ -90,7 +98,7 @@ export class TranslationWorker extends WorkerHost {
       await this.handleTranslationError(segmentId, segment, err);
     }
 
-    await this.onSegmentCompleted(chapterId);
+    await this.onSegmentCompleted(chapterId, chapterJobId, bookJobId);
   }
 
   private async handleTranslationError(
@@ -115,7 +123,11 @@ export class TranslationWorker extends WorkerHost {
     });
   }
 
-  private async onSegmentCompleted(chapterId: string): Promise<void> {
+  private async onSegmentCompleted(
+    chapterId: string,
+    chapterJobId?: string,
+    bookJobId?: string,
+  ): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
       await manager.increment(
         Chapter,
@@ -132,6 +144,8 @@ export class TranslationWorker extends WorkerHost {
 
     const allProcessed = chapter.completedSegments >= chapter.totalSegments;
     if (!allProcessed) {
+      await this.updateChapterJobProgress(chapter, chapterJobId);
+      await this.updateBookJobProgress(chapter.bookId, bookJobId);
       this.eventEmitter.emit('chapter.progress', {
         bookId: chapter.bookId,
         chapterId,
@@ -144,10 +158,14 @@ export class TranslationWorker extends WorkerHost {
       return;
     }
 
-    await this.finalizeChapter(chapter);
+    await this.finalizeChapter(chapter, chapterJobId, bookJobId);
   }
 
-  private async finalizeChapter(chapter: Chapter): Promise<void> {
+  private async finalizeChapter(
+    chapter: Chapter,
+    chapterJobId?: string,
+    bookJobId?: string,
+  ): Promise<void> {
     const segments = await this.segmentRepo.find({
       where: { chapterId: chapter.id },
       order: { segmentIndex: 'ASC' },
@@ -183,8 +201,22 @@ export class TranslationWorker extends WorkerHost {
       translatedContent,
       status: newStatus,
     });
+    if (chapterJobId) {
+      await this.jobRepo.update(chapterJobId, {
+        status:
+          newStatus === ChapterStatus.DONE
+            ? JobStatus.COMPLETED
+            : JobStatus.FAILED,
+        progressPercent: 100,
+        errorMessage:
+          newStatus === ChapterStatus.FAILED
+            ? `${failedCount} segment(s) failed`
+            : undefined,
+      });
+    }
 
-    await this.updateBookStatus(chapter.bookId);
+    await this.updateBookStatus(chapter.bookId, bookJobId);
+    await this.updateBookJobProgress(chapter.bookId, bookJobId);
 
     this.eventEmitter.emit('chapter.progress', {
       bookId: chapter.bookId,
@@ -196,7 +228,10 @@ export class TranslationWorker extends WorkerHost {
     });
   }
 
-  private async updateBookStatus(bookId: string): Promise<void> {
+  private async updateBookStatus(
+    bookId: string,
+    bookJobId?: string,
+  ): Promise<void> {
     const book = await this.bookRepo.findOne({ where: { id: bookId } });
     if (!book) return;
 
@@ -212,5 +247,75 @@ export class TranslationWorker extends WorkerHost {
     else newStatus = BookStatus.PROCESSING;
 
     await this.bookRepo.update(bookId, { status: newStatus });
+    if (!bookJobId) return;
+
+    const hasActiveChapters = chapters.some((chapter) =>
+      [ChapterStatus.PENDING, ChapterStatus.SPLITTING, ChapterStatus.TRANSLATING].includes(
+        chapter.status,
+      ),
+    );
+
+    if (hasActiveChapters) {
+      await this.jobRepo.update(bookJobId, {
+        status: JobStatus.RUNNING,
+      });
+      return;
+    }
+
+    await this.jobRepo.update(bookJobId, {
+      status:
+        newStatus === BookStatus.COMPLETED
+          ? JobStatus.COMPLETED
+          : newStatus === BookStatus.FAILED
+            ? JobStatus.FAILED
+            : JobStatus.COMPLETED,
+      progressPercent: 100,
+      errorMessage:
+        newStatus === BookStatus.FAILED
+          ? 'All chapters failed to translate'
+          : undefined,
+    });
+  }
+
+  private async updateChapterJobProgress(
+    chapter: Chapter,
+    chapterJobId?: string,
+  ): Promise<void> {
+    if (!chapterJobId || chapter.totalSegments === 0) return;
+
+    await this.jobRepo.update(chapterJobId, {
+      status: JobStatus.RUNNING,
+      progressPercent: Math.floor(
+        (chapter.completedSegments / chapter.totalSegments) * 100,
+      ),
+    });
+  }
+
+  private async updateBookJobProgress(
+    bookId: string,
+    bookJobId?: string,
+  ): Promise<void> {
+    if (!bookJobId) return;
+
+    const summary = await this.chapterRepo
+      .createQueryBuilder('chapter')
+      .select('COALESCE(SUM(chapter.totalSegments), 0)', 'totalSegments')
+      .addSelect(
+        'COALESCE(SUM(chapter.completedSegments), 0)',
+        'completedSegments',
+      )
+      .where('chapter.bookId = :bookId', { bookId })
+      .getRawOne<{ totalSegments: string; completedSegments: string }>();
+
+    const totalSegments = Number(summary?.totalSegments ?? 0);
+    const completedSegments = Number(summary?.completedSegments ?? 0);
+    const progressPercent =
+      totalSegments === 0
+        ? 0
+        : Math.floor((completedSegments / totalSegments) * 100);
+
+    await this.jobRepo.update(bookJobId, {
+      progressPercent,
+    });
   }
 }

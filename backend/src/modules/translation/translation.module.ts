@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { Chapter } from '../../database/entities/chapter.entity';
 import { Segment } from '../../database/entities/segment.entity';
 import { Book } from '../../database/entities/book.entity';
+import { TranslationJob } from '../../database/entities/translation-job.entity';
 import { HFInferenceProvider } from './providers/hf-inference.provider';
 import { ChineseTextChunker } from './chunker/chinese-text-chunker';
 import { ChapterSplitWorker } from './workers/chapter-split.worker';
@@ -16,7 +17,7 @@ import { QueuesModule } from '../../queue/queues.module';
   imports: [
     ConfigModule,
     QueuesModule,
-    TypeOrmModule.forFeature([Chapter, Segment, Book]),
+    TypeOrmModule.forFeature([Chapter, Segment, Book, TranslationJob]),
   ],
   providers: [
     {

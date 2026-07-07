@@ -6,6 +6,7 @@ import { login } from './api';
 import UploadPage from './pages/UploadPage';
 import DashboardPage from './pages/DashboardPage';
 import ReaderPage from './pages/ReaderPage';
+import BookDetailPage from './pages/BookDetailPage';
 
 const queryClient = new QueryClient();
 
@@ -51,7 +52,8 @@ function App() {
             <Routes>
               <Route path="/" element={<DashboardPage />} />
               <Route path="/upload" element={<UploadPage />} />
-              <Route path="/book/:bookId/read" element={<ReaderPage />} />
+              <Route path="/books/:bookId" element={<BookDetailPage />} />
+              <Route path="/books/:bookId/chapters/:chapterId" element={<ReaderPage />} />
             </Routes>
           </main>
         </div>

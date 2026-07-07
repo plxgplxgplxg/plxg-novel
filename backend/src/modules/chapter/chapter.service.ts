@@ -2,18 +2,23 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Chapter, ChapterStatus } from '../../database/entities/chapter.entity';
-import { Segment, SegmentStatus } from '../../database/entities/segment.entity';
-import { Book } from '../../database/entities/book.entity';
+import { Segment } from '../../database/entities/segment.entity';
+import { Book, BookStatus } from '../../database/entities/book.entity';
+import {
+  TranslationJob,
+  JobStatus,
+  JobType,
+} from '../../database/entities/translation-job.entity';
 import { CreateChapterDto } from './dto/create-chapter.dto';
 import {
   QUEUE_CHAPTER_SPLIT,
-  QUEUE_TRANSLATION,
   BULLMQ_BACKOFF_CONFIG,
   MAX_RETRY_ATTEMPTS,
 } from '../../queue/queue.constants';
@@ -29,10 +34,10 @@ export class ChapterService {
     private readonly segmentRepo: Repository<Segment>,
     @InjectRepository(Book)
     private readonly bookRepo: Repository<Book>,
+    @InjectRepository(TranslationJob)
+    private readonly jobRepo: Repository<TranslationJob>,
     @InjectQueue(QUEUE_CHAPTER_SPLIT)
     private readonly splitQueue: Queue,
-    @InjectQueue(QUEUE_TRANSLATION)
-    private readonly translationQueue: Queue,
   ) {}
 
   async addChapter(
@@ -57,7 +62,7 @@ export class ChapterService {
     bookId: string,
     userId: string,
     fileContent: string,
-  ): Promise<Chapter[]> {
+  ): Promise<{ chapters: Chapter[]; jobId: string }> {
     await this.assertBookOwnership(bookId, userId);
 
     let chapterBlocks = this.extractChaptersFromText(fileContent);
@@ -89,7 +94,9 @@ export class ChapterService {
     );
 
     try {
-      return await this.chapterRepo.save(chapters);
+      const savedChapters = await this.chapterRepo.save(chapters);
+      const jobId = await this.enqueueChaptersForTranslation(bookId, savedChapters);
+      return { chapters: savedChapters, jobId };
     } catch (error) {
       if (this.isDuplicateChapterNumberError(error)) {
         throw new ConflictException(
@@ -100,7 +107,57 @@ export class ChapterService {
     }
   }
 
-  async findOne(id: string, userId: string): Promise<Chapter> {
+  async findOne(id: string, userId: string) {
+    const chapter = await this.findChapterForOwner(id, userId);
+
+    if (chapter.status !== ChapterStatus.DONE) {
+      throw new ForbiddenException('Chapter is not ready to read');
+    }
+
+    return {
+      id: chapter.id,
+      bookId: chapter.bookId,
+      chapterNumber: chapter.chapterNumber,
+      titleOriginal: chapter.titleOriginal,
+      titleTranslated: chapter.titleTranslated,
+      status: chapter.status,
+      totalSegments: chapter.totalSegments,
+      completedSegments: chapter.completedSegments,
+      translatedContent: chapter.translatedContent,
+      createdAt: chapter.createdAt,
+      updatedAt: chapter.updatedAt,
+    };
+  }
+
+  async retranslateChapter(
+    id: string,
+    userId: string,
+  ): Promise<{ jobId: string }> {
+    const chapter = await this.findChapterForOwner(id, userId);
+    await this.segmentRepo.delete({ chapterId: id });
+    await this.chapterRepo.update(id, {
+      status: ChapterStatus.PENDING,
+      totalSegments: 0,
+      completedSegments: 0,
+      translatedContent: undefined,
+    });
+
+    const jobId = await this.enqueueChaptersForTranslation(chapter.bookId, [chapter]);
+    return { jobId };
+  }
+
+  private async assertBookOwnership(
+    bookId: string,
+    userId: string,
+  ): Promise<void> {
+    const book = await this.bookRepo.findOne({ where: { id: bookId, userId } });
+    if (!book) throw new NotFoundException('Book not found');
+  }
+
+  private async findChapterForOwner(
+    id: string,
+    userId: string,
+  ): Promise<Chapter> {
     const chapter = await this.chapterRepo.findOne({
       where: { id },
       relations: { book: true },
@@ -113,56 +170,51 @@ export class ChapterService {
     return chapter;
   }
 
-  async retranslateChapter(
-    id: string,
-    userId: string,
-  ): Promise<{ jobId: string }> {
-    const chapter = await this.findOne(id, userId);
-
-    const failedSegments = await this.segmentRepo.find({
-      where: { chapterId: id, status: SegmentStatus.FAILED },
-    });
-
-    if (
-      failedSegments.length === 0 &&
-      chapter.status !== ChapterStatus.PENDING
-    ) {
-      await this.splitQueue.add(
-        'split-chapter',
-        { chapterId: id },
-        { attempts: MAX_RETRY_ATTEMPTS, backoff: BULLMQ_BACKOFF_CONFIG },
-      );
-      return { jobId: id };
-    }
-
-    if (failedSegments.length > 0) {
-      await this.segmentRepo.update(
-        failedSegments.map((s) => s.id),
-        {
-          status: SegmentStatus.PENDING,
-          retryCount: 0,
-          errorMessage: undefined,
-        },
-      );
-
-      const retryJobs = failedSegments.map((seg) => ({
-        name: 'translate-segment',
-        data: { segmentId: seg.id, chapterId: id },
-        opts: { attempts: MAX_RETRY_ATTEMPTS, backoff: BULLMQ_BACKOFF_CONFIG },
-      }));
-
-      await this.translationQueue.addBulk(retryJobs);
-    }
-
-    return { jobId: id };
-  }
-
-  private async assertBookOwnership(
+  private async enqueueChaptersForTranslation(
     bookId: string,
-    userId: string,
-  ): Promise<void> {
-    const book = await this.bookRepo.findOne({ where: { id: bookId, userId } });
-    if (!book) throw new NotFoundException('Book not found');
+    chapters: Chapter[],
+  ): Promise<string> {
+    const bookJob = await this.jobRepo.save(
+      this.jobRepo.create({
+        bookId,
+        jobType: JobType.TRANSLATE_BOOK,
+        status: JobStatus.QUEUED,
+      }),
+    );
+
+    const chapterJobs = await this.jobRepo.save(
+      chapters.map((chapter) =>
+        this.jobRepo.create({
+          bookId,
+          chapterId: chapter.id,
+          jobType: JobType.TRANSLATE_CHAPTER,
+          status: JobStatus.QUEUED,
+        }),
+      ),
+    );
+
+    const chapterJobByChapterId = new Map(
+      chapterJobs.map((job) => [job.chapterId, job.id]),
+    );
+
+    await this.bookRepo.update(bookId, { status: BookStatus.PROCESSING });
+
+    await this.splitQueue.addBulk(
+      chapters.map((chapter) => ({
+        name: 'split-chapter',
+        data: {
+          chapterId: chapter.id,
+          bookJobId: bookJob.id,
+          chapterJobId: chapterJobByChapterId.get(chapter.id),
+        },
+        opts: {
+          attempts: MAX_RETRY_ATTEMPTS,
+          backoff: BULLMQ_BACKOFF_CONFIG,
+        },
+      })),
+    );
+
+    return bookJob.id;
   }
 
   private extractChaptersFromText(

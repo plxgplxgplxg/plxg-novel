@@ -26,11 +26,11 @@ export class Chapter {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ name: 'bookId' })
   bookId: string;
 
   @ManyToOne(() => Book, (book) => book.chapters)
-  @JoinColumn({ name: 'book_id' })
+  @JoinColumn({ name: 'bookId' })
   book: Book;
 
   @Column()

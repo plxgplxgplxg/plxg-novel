@@ -5,6 +5,7 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -26,8 +27,17 @@ export class BookController {
   }
 
   @Get()
-  findAll(@CurrentUser() user: JwtPayload) {
-    return this.bookService.findAllByUser(user.sub);
+  findAll(
+    @CurrentUser() user: JwtPayload,
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.bookService.findAllByUser(user.sub, {
+      search,
+      page,
+      pageSize,
+    });
   }
 
   @Get(':id')

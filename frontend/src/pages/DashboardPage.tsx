@@ -1,24 +1,24 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { createBookProgressStreamUrl, fetchBooks, startTranslation } from '../api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { createBookProgressStreamUrl, fetchBooks } from '../api';
 import { Link } from 'react-router-dom';
-import { Play, RotateCw, BookOpen, AlertCircle, Plus } from 'lucide-react';
-import type { Book } from '../store'; // Just for types
+import { BookOpen, Search, Plus } from 'lucide-react';
+import type { BookSummary } from '../store';
 import { useEffect, useState } from 'react';
 
 const DashboardPage = () => {
   const queryClient = useQueryClient();
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
 
-  const { data: books = [], isLoading } = useQuery({
-    queryKey: ['books'],
-    queryFn: fetchBooks,
+  const { data, isLoading } = useQuery({
+    queryKey: ['books', search, page],
+    queryFn: () => fetchBooks({ search, page, pageSize: 9 }),
   });
+  const books = data?.items ?? [];
 
   useEffect(() => {
     const activeBooks = books.filter((book) =>
-      book.chapters?.some((chapter) =>
-        ['pending', 'splitting', 'translating'].includes(chapter.status),
-      ),
+      ['draft', 'processing'].includes(book.status),
     );
 
     if (activeBooks.length === 0) {
@@ -45,17 +45,6 @@ const DashboardPage = () => {
     };
   }, [books, queryClient]);
 
-  const translateMutation = useMutation({
-    mutationFn: startTranslation,
-    onSuccess: () => {
-      setActionError(null);
-      queryClient.invalidateQueries({ queryKey: ['books'] });
-    },
-    onError: (error: any) => {
-      setActionError(error?.response?.data?.message || 'Start translation failed.');
-    },
-  });
-
   if (isLoading) {
     return <div style={{ textAlign: 'center', padding: '4rem' }}>Loading...</div>;
   }
@@ -63,10 +52,31 @@ const DashboardPage = () => {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-        <h2>Translation Dashboard</h2>
+        <div>
+          <h2>Thư viện truyện</h2>
+          <p style={{ color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+            Upload chương, dịch nền bằng worker và theo dõi tiến độ realtime.
+          </p>
+        </div>
         <Link to="/upload" className="btn">
-          Upload New Book
+          <Plus size={16} /> Upload truyện
         </Link>
+      </div>
+
+      <div className="card" style={{ marginBottom: '1.5rem', padding: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <Search size={18} color="var(--text-muted)" />
+          <input
+            className="input"
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
+            placeholder="Tìm theo tên truyện..."
+            style={{ marginBottom: 0 }}
+          />
+        </div>
       </div>
 
       {books.length === 0 ? (
@@ -77,30 +87,9 @@ const DashboardPage = () => {
         </div>
       ) : (
         <>
-          {actionError && (
-            <div
-              style={{
-                marginBottom: '1rem',
-                padding: '0.875rem 1rem',
-                background: 'rgba(239, 68, 68, 0.12)',
-                border: '1px solid rgba(239, 68, 68, 0.3)',
-                borderRadius: '8px',
-                color: '#f87171',
-                fontSize: '0.875rem',
-              }}
-            >
-              {actionError}
-            </div>
-          )}
           <div className="grid">
-            {books.map((book: Book) => {
-            const totalSegments = book.chapters?.reduce((acc, c) => acc + (c.totalSegments || 0), 0) || 0;
-            const completedSegments = book.chapters?.reduce((acc, c) => acc + (c.completedSegments || 0), 0) || 0;
-            const progress = totalSegments === 0 ? 0 : Math.round((completedSegments / totalSegments) * 100);
-            const hasChapters = (book.chapters?.length || 0) > 0;
-            const isTranslatingThisBook =
-              translateMutation.isPending && translateMutation.variables === book.id;
-
+            {books.map((book: BookSummary) => {
+            const progress = book.totalSegments === 0 ? 0 : Math.round((book.completedSegments / book.totalSegments) * 100);
             return (
               <div key={book.id} className="card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -121,32 +110,21 @@ const DashboardPage = () => {
                   </div>
                 </div>
 
+                <div style={{ marginTop: '1rem', display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem', fontSize: '0.875rem' }}>
+                  <div>
+                    <div style={{ color: 'var(--text-muted)' }}>Số chương</div>
+                    <div>{book.chapterCount}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--text-muted)' }}>Đã xong</div>
+                    <div>{book.translatedChapterCount}</div>
+                  </div>
+                </div>
+
                 <div style={{ marginTop: '1.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  {book.status === 'draft' && (
-                    <button
-                      onClick={() => {
-                        setActionError(null);
-                        translateMutation.mutate(book.id);
-                      }}
-                      className="btn btn-secondary"
-                      style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
-                      disabled={isTranslatingThisBook || !hasChapters}
-                      title={hasChapters ? undefined : 'Thêm ít nhất một chương trước khi dịch'}
-                    >
-                      {isTranslatingThisBook ? <RotateCw size={16} className="spin" /> : <Play size={16} />}
-                      {hasChapters ? 'Start Translation' : 'Chưa có chương'}
-                    </button>
-                  )}
-                  {(book.status === 'partial' || book.status === 'completed') && (
-                    <Link to={`/book/${book.id}/read`} className="btn" style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}>
-                      <BookOpen size={16} /> Read
-                    </Link>
-                  )}
-                  {book.status === 'processing' && (
-                    <button className="btn btn-secondary" disabled style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}>
-                      <RotateCw size={16} className="spin" /> Translating...
-                    </button>
-                  )}
+                  <Link to={`/books/${book.id}`} className="btn" style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}>
+                    <BookOpen size={16} /> Xem chi tiết
+                  </Link>
                   <Link
                     to={`/upload?bookId=${book.id}`}
                     className="btn btn-secondary"
@@ -156,32 +134,29 @@ const DashboardPage = () => {
                   </Link>
                 </div>
 
-                <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-                  <h4 style={{ fontSize: '0.875rem', marginBottom: '0.5rem', color: 'var(--text-muted)' }}>Chapters ({book.chapters?.length || 0})</h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    {book.chapters?.map(chapter => (
-                      <div key={chapter.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', alignItems: 'center', backgroundColor: 'rgba(15, 23, 42, 0.3)', padding: '0.5rem', borderRadius: '6px' }}>
-                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '150px' }}>
-                          {chapter.chapterNumber}. {chapter.titleTranslated || chapter.titleOriginal}
-                        </span>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <span style={{ color: 'var(--text-muted)' }}>{chapter.totalSegments ? Math.round((chapter.completedSegments / chapter.totalSegments) * 100) : 0}%</span>
-                          {chapter.status === 'failed' && <AlertCircle size={14} color="var(--danger)" />}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
               </div>
             );
             })}
           </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem' }}>
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+              {data?.totalItems ?? 0} truyện
+            </span>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button className="btn btn-secondary" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>
+                Trang trước
+              </button>
+              <button
+                className="btn btn-secondary"
+                disabled={page >= (data?.totalPages ?? 1)}
+                onClick={() => setPage((current) => current + 1)}
+              >
+                Trang sau
+              </button>
+            </div>
+          </div>
         </>
       )}
-      <style>{`
-        .spin { animation: spin 2s linear infinite; }
-        @keyframes spin { 100% { transform: rotate(360deg); } }
-      `}</style>
     </div>
   );
 };

@@ -40,6 +40,10 @@ export class ChapterController {
     @CurrentUser() user: JwtPayload,
     @UploadedFile() file: Express.Multer.File,
   ) {
+    if (!file) {
+      throw new BadRequestException('File is required');
+    }
+
     const originalName = file.originalname.toLowerCase();
     let content: string;
 
