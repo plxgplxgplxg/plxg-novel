@@ -29,6 +29,10 @@ import {
   TRANSLATION_WORKER_CONCURRENCY,
   MAX_FAILED_SEGMENT_PERCENT,
 } from '../../../queue/queue.constants';
+import {
+  buildReadableChapterContent,
+  PARAGRAPH_MARKER,
+} from '../../chapter/chapter-readability';
 
 export interface TranslationJobPayload {
   segmentId: string;
@@ -36,8 +40,6 @@ export interface TranslationJobPayload {
   bookJobId?: string;
   chapterJobId?: string;
 }
-
-const PARAGRAPH_MARKER = '\n';
 
 @Processor(QUEUE_TRANSLATION, { concurrency: TRANSLATION_WORKER_CONCURRENCY })
 export class TranslationWorker extends WorkerHost {
@@ -180,11 +182,8 @@ export class TranslationWorker extends WorkerHost {
     ).length;
     const failedPercent = failedCount / segments.length;
 
-    const translatedContent = segments
-      .map((s) =>
-        s.sourceText === PARAGRAPH_MARKER ? '\n\n' : (s.translatedText ?? ''),
-      )
-      .join('');
+    const { content: translatedContent, readableSegmentCount } =
+      buildReadableChapterContent(segments);
 
     const newStatus =
       failedPercent > MAX_FAILED_SEGMENT_PERCENT
@@ -202,7 +201,7 @@ export class TranslationWorker extends WorkerHost {
     }
 
     await this.chapterRepo.update(chapter.id, {
-      translatedContent,
+      translatedContent: translatedContent ?? '',
       status: newStatus,
     });
     if (chapterJobId) {
@@ -214,7 +213,7 @@ export class TranslationWorker extends WorkerHost {
         progressPercent: 100,
         errorMessage:
           newStatus === ChapterStatus.FAILED
-            ? `${failedCount} segment(s) failed`
+            ? `${failedCount} segment(s) failed; ${readableSegmentCount} segment(s) still rendered`
             : undefined,
       });
     }

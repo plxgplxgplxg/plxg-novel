@@ -144,7 +144,7 @@ const BookDetailPage = () => {
 
         <div className="chapter-list">
           {book.chapters.map((chapter) => {
-            const canRead = chapter.status === 'done';
+            const canRead = chapter.status === 'done' || chapter.hasReadableContent;
             const chapterProgress = chapter.totalSegments === 0 ? 0 : Math.round((chapter.completedSegments / chapter.totalSegments) * 100);
 
             return (

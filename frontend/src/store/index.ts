@@ -9,6 +9,7 @@ export interface ChapterSummary {
   status: 'pending' | 'splitting' | 'translating' | 'done' | 'failed';
   totalSegments: number;
   completedSegments: number;
+  hasReadableContent?: boolean;
   createdAt?: string;
   updatedAt?: string;
   sourceFileName?: string;
@@ -16,8 +17,18 @@ export interface ChapterSummary {
   canManage?: boolean;
 }
 
+export interface FailedSegmentDiagnostic {
+  segmentIndex: number;
+  sourceText: string;
+  errorMessage?: string | null;
+}
+
 export interface ChapterDetail extends ChapterSummary {
   translatedContent?: string;
+  failedSegmentCount?: number;
+  readableSegmentCount?: number;
+  hasReadableContent?: boolean;
+  failedSegments?: FailedSegmentDiagnostic[];
 }
 
 export interface BookSummary {

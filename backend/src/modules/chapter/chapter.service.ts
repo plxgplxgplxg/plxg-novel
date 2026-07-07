@@ -24,6 +24,10 @@ import {
   BULLMQ_BACKOFF_CONFIG,
   MAX_RETRY_ATTEMPTS,
 } from '../../queue/queue.constants';
+import {
+  buildReadableChapterContent,
+  getFailedSegmentDiagnostics,
+} from './chapter-readability';
 
 const CHAPTER_NUMBER_PATTERN = /^((第[一二三四五六七八九十百千万零两\d]+章)|Chapter\s+(\d+))/i;
 const DEFAULT_PAGE = 1;
@@ -173,8 +177,16 @@ export class ChapterService {
     }
 
     const canManage = userId === chapter.book.userId;
+    const segments = await this.segmentRepo.find({
+      where: { chapterId: chapter.id },
+      order: { segmentIndex: 'ASC' },
+    });
+    const failedSegments = getFailedSegmentDiagnostics(segments);
+    const { content: translatedContent, readableSegmentCount } =
+      buildReadableChapterContent(segments);
+    const hasReadableContent = readableSegmentCount > 0;
 
-    if (!canManage && chapter.status !== ChapterStatus.DONE) {
+    if (!canManage && chapter.status !== ChapterStatus.DONE && !hasReadableContent) {
       throw new ForbiddenException('Chapter is not ready to read');
     }
 
@@ -187,7 +199,11 @@ export class ChapterService {
       status: chapter.status,
       totalSegments: chapter.totalSegments,
       completedSegments: chapter.completedSegments,
-      translatedContent: chapter.translatedContent,
+      translatedContent: translatedContent ?? chapter.translatedContent,
+      failedSegmentCount: failedSegments.length,
+      readableSegmentCount,
+      hasReadableContent,
+      failedSegments,
       createdAt: chapter.createdAt,
       updatedAt: chapter.updatedAt,
       sourceFileName: chapter.sourceFileName,
@@ -206,7 +222,7 @@ export class ChapterService {
       status: ChapterStatus.PENDING,
       totalSegments: 0,
       completedSegments: 0,
-      translatedContent: undefined,
+      translatedContent: '',
     });
 
     const jobId = await this.enqueueChaptersForTranslation(chapter.bookId, [chapter]);
@@ -232,8 +248,8 @@ export class ChapterService {
       status: ChapterStatus.PENDING,
       totalSegments: 0,
       completedSegments: 0,
-      translatedContent: undefined,
-      titleTranslated: undefined,
+      translatedContent: '',
+      titleTranslated: '',
     });
 
     const refreshedChapter = await this.chapterRepo.findOne({
@@ -534,6 +550,9 @@ export class ChapterService {
       updatedAt: chapter.updatedAt,
       sourceFileName: chapter.sourceFileName,
       sourceFileSize: chapter.sourceFileSize,
+      hasReadableContent:
+        chapter.status === ChapterStatus.DONE ||
+        Boolean(chapter.translatedContent?.trim()),
     };
   }
 }

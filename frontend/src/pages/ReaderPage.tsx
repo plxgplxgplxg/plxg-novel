@@ -81,6 +81,8 @@ const ReaderPage = () => {
   const currentChapter = chapterDetail;
   const prevChapter = currentChapterIdx > 0 ? book.chapters[currentChapterIdx - 1] : undefined;
   const nextChapter = currentChapterIdx >= 0 && currentChapterIdx < book.chapters.length - 1 ? book.chapters[currentChapterIdx + 1] : undefined;
+  const canReadPrev = prevChapter?.status === 'done' || prevChapter?.hasReadableContent;
+  const canReadNext = nextChapter?.status === 'done' || nextChapter?.hasReadableContent;
 
   if (!currentChapterMeta || !currentChapter) {
     return (
@@ -115,12 +117,36 @@ const ReaderPage = () => {
           {currentChapter.titleTranslated || currentChapter.titleOriginal}
         </h2>
 
+        {currentChapter.failedSegmentCount ? (
+          <div className="reader-warning">
+            <strong>
+              {currentChapter.failedSegmentCount} segment lỗi đang được fallback về nguyên văn tiếng Trung.
+            </strong>
+            <span>
+              {currentChapter.readableSegmentCount ?? 0}/{currentChapter.totalSegments} segment vẫn dịch được và đang hiển thị bình thường.
+            </span>
+          </div>
+        ) : null}
+
         <div className="reader-content reader-prose">
           {currentChapter.translatedContent || 'Nội dung trống.'}
         </div>
 
+        {currentChapter.failedSegments?.length ? (
+          <div className="reader-fallback-list">
+            <h3>Segment fallback</h3>
+            {currentChapter.failedSegments.map((segment) => (
+              <article key={segment.segmentIndex} className="reader-fallback-item">
+                <strong>Segment {segment.segmentIndex + 1}</strong>
+                <p>{segment.errorMessage || 'Translation provider returned an unknown error.'}</p>
+                <pre>{segment.sourceText}</pre>
+              </article>
+            ))}
+          </div>
+        ) : null}
+
         <div className="reader-footer">
-          {prevChapter?.status === 'done' ? (
+          {prevChapter && canReadPrev ? (
             <Link to={`/books/${book.id}/chapters/${prevChapter.id}`} className="btn btn-secondary">
               <ChevronLeft size={18} /> Chương trước
             </Link>
@@ -134,7 +160,7 @@ const ReaderPage = () => {
             <List size={18} /> {currentChapterIdx + 1} / {book.chapters.length}
           </div>
 
-          {nextChapter?.status === 'done' ? (
+          {nextChapter && canReadNext ? (
             <Link to={`/books/${book.id}/chapters/${nextChapter.id}`} className="btn btn-secondary">
               Chương tiếp <ChevronRight size={18} />
             </Link>

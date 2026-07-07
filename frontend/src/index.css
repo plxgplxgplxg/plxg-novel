@@ -755,11 +755,73 @@ select.input:focus {
   color: var(--color-text-primary);
 }
 
+.reader-warning {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-6);
+  padding: var(--space-4);
+  border: 1px solid rgba(253, 179, 194, 0.22);
+  border-radius: 16px;
+  background: rgba(253, 179, 194, 0.08);
+  color: var(--color-text-primary);
+}
+
+.reader-warning span {
+  color: var(--color-text-secondary);
+  font-size: var(--text-small);
+}
+
 .reader-prose {
   white-space: pre-wrap;
   font-family: var(--font-reading);
   font-size: var(--text-reading);
   line-height: 1.85;
+}
+
+.reader-fallback-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-8);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--color-border);
+}
+
+.reader-fallback-list h3 {
+  margin: 0;
+  font-family: var(--font-reading);
+  font-size: var(--text-h3);
+  font-weight: 400;
+}
+
+.reader-fallback-item {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.reader-fallback-item strong,
+.reader-fallback-item p,
+.reader-fallback-item pre {
+  display: block;
+  margin: 0;
+}
+
+.reader-fallback-item p {
+  margin-top: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--text-small);
+}
+
+.reader-fallback-item pre {
+  margin-top: var(--space-3);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-ui);
+  font-size: var(--text-small);
+  color: var(--color-text-primary);
 }
 
 .reader-footer {
