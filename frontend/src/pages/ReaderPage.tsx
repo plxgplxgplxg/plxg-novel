@@ -4,6 +4,16 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createBookProgressStreamUrl, fetchBookDetails, fetchChapter } from '../api';
 import { ChevronLeft, ChevronRight, List, LibraryBig } from 'lucide-react';
 
+const isChapterReadable = (chapter?: {
+  totalSegments: number;
+  completedSegments: number;
+}) =>
+  Boolean(
+    chapter &&
+      chapter.totalSegments > 0 &&
+      chapter.completedSegments >= chapter.totalSegments,
+  );
+
 const ReaderPage = () => {
   const { bookId, chapterId } = useParams<{ bookId: string; chapterId: string }>();
   const queryClient = useQueryClient();
@@ -81,8 +91,8 @@ const ReaderPage = () => {
   const currentChapter = chapterDetail;
   const prevChapter = currentChapterIdx > 0 ? book.chapters[currentChapterIdx - 1] : undefined;
   const nextChapter = currentChapterIdx >= 0 && currentChapterIdx < book.chapters.length - 1 ? book.chapters[currentChapterIdx + 1] : undefined;
-  const canReadPrev = prevChapter?.status === 'done' || prevChapter?.hasReadableContent;
-  const canReadNext = nextChapter?.status === 'done' || nextChapter?.hasReadableContent;
+  const canReadPrev = isChapterReadable(prevChapter);
+  const canReadNext = isChapterReadable(nextChapter);
 
   if (!currentChapterMeta || !currentChapter) {
     return (

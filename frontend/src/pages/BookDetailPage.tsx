@@ -20,6 +20,15 @@ const CHAPTER_STATUS_LABELS = {
   failed: 'Lỗi',
 } as const;
 
+const isChapterReadable = (chapter: {
+  status: string;
+  totalSegments: number;
+  completedSegments: number;
+  hasReadableContent?: boolean;
+}) =>
+  chapter.totalSegments > 0 &&
+  chapter.completedSegments >= chapter.totalSegments;
+
 const BookDetailPage = () => {
   const { bookId } = useParams<{ bookId: string }>();
   const queryClient = useQueryClient();
@@ -144,7 +153,7 @@ const BookDetailPage = () => {
 
         <div className="chapter-list">
           {book.chapters.map((chapter) => {
-            const canRead = chapter.status === 'done' || chapter.hasReadableContent;
+            const canRead = isChapterReadable(chapter);
             const chapterProgress = chapter.totalSegments === 0 ? 0 : Math.round((chapter.completedSegments / chapter.totalSegments) * 100);
 
             return (
