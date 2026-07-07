@@ -26,14 +26,6 @@ export const isReadableSegment = (segment: SegmentLike) =>
 
 export const buildReadableChapterContent = (segments: SegmentLike[]) => {
   const readableSegmentCount = segments.filter(isReadableSegment).length;
-
-  if (readableSegmentCount === 0) {
-    return {
-      content: undefined,
-      readableSegmentCount: 0,
-    };
-  }
-
   const content = segments
     .map((segment) => {
       if (isParagraphMarker(segment.sourceText)) {
@@ -52,7 +44,7 @@ export const buildReadableChapterContent = (segments: SegmentLike[]) => {
     .join('');
 
   return {
-    content,
+    content: segments.length > 0 ? content : undefined,
     readableSegmentCount,
   };
 };

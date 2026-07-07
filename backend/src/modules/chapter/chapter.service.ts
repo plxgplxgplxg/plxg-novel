@@ -184,9 +184,12 @@ export class ChapterService {
     const failedSegments = getFailedSegmentDiagnostics(segments);
     const { content: translatedContent, readableSegmentCount } =
       buildReadableChapterContent(segments);
-    const hasReadableContent = readableSegmentCount > 0;
+    const isProcessed =
+      chapter.totalSegments > 0 &&
+      chapter.completedSegments >= chapter.totalSegments;
+    const hasReadableContent = isProcessed;
 
-    if (!canManage && chapter.status !== ChapterStatus.DONE && !hasReadableContent) {
+    if (!canManage && !isProcessed) {
       throw new ForbiddenException('Chapter is not ready to read');
     }
 
@@ -551,8 +554,8 @@ export class ChapterService {
       sourceFileName: chapter.sourceFileName,
       sourceFileSize: chapter.sourceFileSize,
       hasReadableContent:
-        chapter.status === ChapterStatus.DONE ||
-        Boolean(chapter.translatedContent?.trim()),
+        chapter.totalSegments > 0 &&
+        chapter.completedSegments >= chapter.totalSegments,
     };
   }
 }

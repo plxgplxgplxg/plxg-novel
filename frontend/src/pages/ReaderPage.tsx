@@ -25,9 +25,12 @@ const ReaderPage = () => {
   });
 
   const currentChapterIdx = book?.chapters.findIndex((chapter) => chapter.id === chapterId) ?? -1;
-  const currentChapterMeta = currentChapterIdx >= 0 ? book?.chapters?.[currentChapterIdx] : undefined;
 
-  const { data: chapterDetail } = useQuery({
+  const {
+    data: chapterDetail,
+    isLoading: isChapterLoading,
+    isError: isChapterError,
+  } = useQuery({
     queryKey: ['chapter', chapterId],
     queryFn: () => fetchChapter(chapterId!),
     enabled: !!chapterId,
@@ -94,13 +97,25 @@ const ReaderPage = () => {
   const canReadPrev = isChapterReadable(prevChapter);
   const canReadNext = isChapterReadable(nextChapter);
 
-  if (!currentChapterMeta || !currentChapter) {
+  if (isChapterLoading) {
+    return (
+      <div className="page-loading-state">
+        <div className="card loading-card">
+          <span className="eyebrow">Reader</span>
+          <h2>Đang tải nội dung chương</h2>
+          <p>Hệ thống đang lấy nội dung đã ghép và các segment fallback.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentChapter || isChapterError) {
     return (
       <div className="page-loading-state">
         <div className="card loading-card">
           <span className="eyebrow">Reader</span>
           <h2>Chương chưa sẵn sàng</h2>
-          <p>Chương này chưa dịch xong hoặc không còn tồn tại.</p>
+          <p>Chương này chưa dịch xong, không còn tồn tại hoặc bạn không có quyền xem.</p>
         </div>
       </div>
     );
@@ -118,7 +133,7 @@ const ReaderPage = () => {
         </div>
         <div className="reader-index-pill">
           <LibraryBig size={16} />
-          <span>{currentChapterIdx + 1} / {book.chapters.length}</span>
+          <span>{currentChapterIdx >= 0 ? currentChapterIdx + 1 : '?'} / {book.chapters.length}</span>
         </div>
       </div>
 
@@ -167,7 +182,7 @@ const ReaderPage = () => {
           )}
 
           <div className="reader-position">
-            <List size={18} /> {currentChapterIdx + 1} / {book.chapters.length}
+            <List size={18} /> {currentChapterIdx >= 0 ? currentChapterIdx + 1 : '?'} / {book.chapters.length}
           </div>
 
           {nextChapter && canReadNext ? (

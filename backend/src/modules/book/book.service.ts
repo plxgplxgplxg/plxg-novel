@@ -10,7 +10,6 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Book, BookStatus } from '../../database/entities/book.entity';
 import { Chapter, ChapterStatus } from '../../database/entities/chapter.entity';
-import { Segment, SegmentStatus } from '../../database/entities/segment.entity';
 import {
   TranslationJob,
   JobType,
@@ -22,7 +21,6 @@ import {
   BULLMQ_BACKOFF_CONFIG,
   MAX_RETRY_ATTEMPTS,
 } from '../../queue/queue.constants';
-import { PARAGRAPH_MARKER } from '../chapter/chapter-readability';
 
 interface BookListQuery {
   search?: string;
@@ -45,12 +43,8 @@ interface VisibleBookRow {
 
 const READABLE_CHAPTER_PREDICATE = `
   (
-    visible_chapter.status = :doneStatus
-    OR (
-      visible_chapter.status = :failedStatus
-      AND visible_chapter.translatedContent IS NOT NULL
-      AND visible_chapter.translatedContent <> ''
-    )
+    visible_chapter.totalSegments > 0
+    AND visible_chapter.completedSegments >= visible_chapter.totalSegments
   )
 `;
 
@@ -65,8 +59,6 @@ export class BookService {
     private readonly bookRepo: Repository<Book>,
     @InjectRepository(Chapter)
     private readonly chapterRepo: Repository<Chapter>,
-    @InjectRepository(Segment)
-    private readonly segmentRepo: Repository<Segment>,
     @InjectRepository(TranslationJob)
     private readonly jobRepo: Repository<TranslationJob>,
     @InjectQueue(QUEUE_CHAPTER_SPLIT)
@@ -104,8 +96,6 @@ export class BookService {
         ))`,
         {
           userId,
-          doneStatus: ChapterStatus.DONE,
-          failedStatus: ChapterStatus.FAILED,
         },
       );
     } else {
@@ -117,8 +107,6 @@ export class BookService {
             AND ${READABLE_CHAPTER_PREDICATE}
         )`,
         {
-          doneStatus: ChapterStatus.DONE,
-          failedStatus: ChapterStatus.FAILED,
         },
       );
     }
@@ -184,16 +172,12 @@ export class BookService {
     if (!book) throw new NotFoundException('Book not found');
 
     const canManage = userId === book.userId;
-    const readableSegmentCounts = await this.getReadableSegmentCounts(
-      book.chapters.map((chapter) => chapter.id),
-    );
     const visibleChapters = canManage
       ? book.chapters
       : book.chapters.filter(
           (chapter) =>
-            chapter.status === ChapterStatus.DONE ||
-            (readableSegmentCounts.get(chapter.id) ?? 0) > 0 ||
-            Boolean(chapter.translatedContent?.trim()),
+            chapter.totalSegments > 0 &&
+            chapter.completedSegments >= chapter.totalSegments,
         );
 
     if (!canManage && visibleChapters.length === 0) {
@@ -230,38 +214,12 @@ export class BookService {
         totalSegments: chapter.totalSegments,
         completedSegments: chapter.completedSegments,
         hasReadableContent:
-          chapter.status === ChapterStatus.DONE ||
-          (readableSegmentCounts.get(chapter.id) ?? 0) > 0 ||
-          Boolean(chapter.translatedContent?.trim()),
+          chapter.totalSegments > 0 &&
+          chapter.completedSegments >= chapter.totalSegments,
         createdAt: chapter.createdAt,
         updatedAt: chapter.updatedAt,
       })),
     };
-  }
-
-  private async getReadableSegmentCounts(chapterIds: string[]) {
-    if (chapterIds.length === 0) {
-      return new Map<string, number>();
-    }
-
-    const rows = await this.segmentRepo
-      .createQueryBuilder('segment')
-      .select('segment.chapterId', 'chapterId')
-      .addSelect('COUNT(segment.id)::int', 'readableSegmentCount')
-      .where('segment.chapterId IN (:...chapterIds)', { chapterIds })
-      .andWhere('segment.status != :failedStatus', {
-        failedStatus: SegmentStatus.FAILED,
-      })
-      .andWhere('segment.sourceText != :paragraphMarker', {
-        paragraphMarker: PARAGRAPH_MARKER,
-      })
-      .andWhere(`BTRIM(segment.sourceText) <> ''`)
-      .groupBy('segment.chapterId')
-      .getRawMany<{ chapterId: string; readableSegmentCount: number }>();
-
-    return new Map(
-      rows.map((row) => [row.chapterId, Number(row.readableSegmentCount)]),
-    );
   }
 
   async getStatus(id: string, userId: string): Promise<Book> {
