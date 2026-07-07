@@ -6,19 +6,48 @@ import type {
   PaginatedBooksResponse,
 } from '../store';
 
-export const login = async () => {
-  try {
-    const res = await apiClient.post('/auth/login', { email: 'user@example.com', password: 'password' });
-    localStorage.setItem('token', res.data.accessToken);
-    return res.data;
-  } catch (err: any) {
-    if (err.response?.status === 401 || err.response?.status === 404) {
-      const res = await apiClient.post('/auth/register', { email: 'user@example.com', password: 'password' });
-      localStorage.setItem('token', res.data.accessToken);
-      return res.data;
-    }
-    throw err;
-  }
+export interface AuthUser {
+  id: string;
+  email: string;
+}
+
+export interface AuthCredentials {
+  email: string;
+  password: string;
+}
+
+export interface AuthResponse {
+  accessToken: string;
+  user: AuthUser;
+}
+
+export interface DemoAccount {
+  email: string;
+  password: string;
+}
+
+export const login = async (
+  credentials: AuthCredentials,
+): Promise<AuthResponse> => {
+  const res = await apiClient.post('/auth/login', credentials);
+  return res.data;
+};
+
+export const register = async (
+  credentials: AuthCredentials,
+): Promise<AuthResponse> => {
+  const res = await apiClient.post('/auth/register', credentials);
+  return res.data;
+};
+
+export const fetchCurrentUser = async (): Promise<AuthUser> => {
+  const res = await apiClient.get('/auth/me');
+  return res.data;
+};
+
+export const fetchDemoAccounts = async (): Promise<DemoAccount[]> => {
+  const res = await apiClient.get('/auth/demo-accounts');
+  return res.data;
 };
 
 export const fetchBooks = async (params?: {
@@ -64,7 +93,7 @@ export const deleteBook = async (bookId: string) => {
 };
 
 export const createBookProgressStreamUrl = (bookId: string) => {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('plxg_novel_access_token');
   const url = new URL(`/books/${bookId}/progress-stream`, API_URL);
   if (token) {
     url.searchParams.set('token', token);
