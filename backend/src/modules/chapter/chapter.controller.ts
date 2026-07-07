@@ -20,13 +20,14 @@ import { CreateChapterDto } from './dto/create-chapter.dto';
 import { ListBookChaptersDto } from './dto/list-book-chapters.dto';
 import { CurrentUser } from '../shared/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/jwt-payload.interface';
+import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 
 @Controller()
-@UseGuards(AuthGuard('jwt'))
 export class ChapterController {
   constructor(private readonly chapterService: ChapterService) {}
 
   @Post('books/:bookId/chapters')
+  @UseGuards(AuthGuard('jwt'))
   addChapter(
     @Param('bookId') bookId: string,
     @CurrentUser() user: JwtPayload,
@@ -36,6 +37,7 @@ export class ChapterController {
   }
 
   @Post('books/:bookId/chapters/upload')
+  @UseGuards(AuthGuard('jwt'))
   @UseInterceptors(FileInterceptor('file'))
   async uploadChapters(
     @Param('bookId') bookId: string,
@@ -72,6 +74,7 @@ export class ChapterController {
   }
 
   @Get('books/:bookId/chapters')
+  @UseGuards(AuthGuard('jwt'))
   listBookChapters(
     @Param('bookId') bookId: string,
     @CurrentUser() user: JwtPayload,
@@ -81,6 +84,7 @@ export class ChapterController {
   }
 
   @Post('chapters/:id/replace-file')
+  @UseGuards(AuthGuard('jwt'))
   @HttpCode(HttpStatus.ACCEPTED)
   @UseInterceptors(FileInterceptor('file'))
   async replaceChapterFile(
@@ -116,11 +120,13 @@ export class ChapterController {
   }
 
   @Get('chapters/:id')
-  findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.chapterService.findOne(id, user.sub);
+  @UseGuards(OptionalJwtAuthGuard)
+  findOne(@Param('id') id: string, @CurrentUser() user: JwtPayload | null) {
+    return this.chapterService.findOne(id, user?.sub ?? null);
   }
 
   @Post('chapters/:id/translate')
+  @UseGuards(AuthGuard('jwt'))
   @HttpCode(HttpStatus.ACCEPTED)
   retranslate(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.chapterService.retranslateChapter(id, user.sub);

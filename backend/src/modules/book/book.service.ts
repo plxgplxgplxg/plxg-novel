@@ -28,6 +28,19 @@ interface BookListQuery {
   pageSize?: string;
 }
 
+interface VisibleBookRow {
+  id: string;
+  title: string;
+  originalTitle: string | null;
+  status: BookStatus;
+  createdAt: Date;
+  chapterCount: number;
+  translatedChapterCount: number;
+  totalSegments: number;
+  completedSegments: number;
+  canManage: boolean;
+}
+
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 12;
 const MAX_PAGE_SIZE = 50;
@@ -54,7 +67,7 @@ export class BookService {
     return this.bookRepo.save(book);
   }
 
-  async findAllByUser(userId: string, query: BookListQuery) {
+  async findAllVisibleBooks(userId: string | null, query: BookListQuery) {
     const page = this.parsePositiveInt(query.page, DEFAULT_PAGE);
     const pageSize = Math.min(
       this.parsePositiveInt(query.pageSize, DEFAULT_PAGE_SIZE),
@@ -64,8 +77,34 @@ export class BookService {
 
     const baseQuery = this.bookRepo
       .createQueryBuilder('book')
-      .where('book.userId = :userId', { userId })
       .andWhere('book.deletedAt IS NULL');
+
+    if (userId) {
+      baseQuery.andWhere(
+        `(book.userId = :userId OR EXISTS (
+          SELECT 1
+          FROM chapters visible_chapter
+          WHERE visible_chapter.bookId = book.id
+            AND visible_chapter.status = :doneStatus
+        ))`,
+        {
+          userId,
+          doneStatus: ChapterStatus.DONE,
+        },
+      );
+    } else {
+      baseQuery.andWhere(
+        `EXISTS (
+          SELECT 1
+          FROM chapters visible_chapter
+          WHERE visible_chapter.bookId = book.id
+            AND visible_chapter.status = :doneStatus
+        )`,
+        {
+          doneStatus: ChapterStatus.DONE,
+        },
+      );
+    }
 
     if (query.search?.trim()) {
       baseQuery.andWhere(
@@ -89,12 +128,15 @@ export class BookService {
         'COALESCE(SUM(chapter.totalSegments), 0)::int AS "totalSegments"',
         'COALESCE(SUM(chapter.completedSegments), 0)::int AS "completedSegments"',
         `COALESCE(SUM(CASE WHEN chapter.status = 'done' THEN 1 ELSE 0 END), 0)::int AS "translatedChapterCount"`,
+        userId
+          ? `CASE WHEN book.userId = :userId THEN TRUE ELSE FALSE END AS "canManage"`
+          : 'FALSE AS "canManage"',
       ])
       .groupBy('book.id')
       .orderBy('book.createdAt', 'DESC')
       .offset(offset)
       .limit(pageSize)
-      .getRawMany();
+      .getRawMany<VisibleBookRow>();
 
     return {
       items: rows.map((row) => ({
@@ -107,6 +149,7 @@ export class BookService {
         translatedChapterCount: row.translatedChapterCount,
         totalSegments: row.totalSegments,
         completedSegments: row.completedSegments,
+        canManage: row.canManage,
       })),
       page,
       pageSize,
@@ -115,13 +158,22 @@ export class BookService {
     };
   }
 
-  async findOneWithChapters(id: string, userId: string) {
+  async findOneVisibleWithChapters(id: string, userId: string | null) {
     const book = await this.bookRepo.findOne({
-      where: { id, userId, deletedAt: IsNull() },
+      where: { id, deletedAt: IsNull() },
       relations: { chapters: true },
       order: { chapters: { chapterNumber: 'ASC' } },
     });
     if (!book) throw new NotFoundException('Book not found');
+
+    const canManage = userId === book.userId;
+    const visibleChapters = canManage
+      ? book.chapters
+      : book.chapters.filter((chapter) => chapter.status === ChapterStatus.DONE);
+
+    if (!canManage && visibleChapters.length === 0) {
+      throw new NotFoundException('Book not found');
+    }
 
     return {
       id: book.id,
@@ -130,19 +182,20 @@ export class BookService {
       status: book.status,
       sourceLang: book.sourceLang,
       targetLang: book.targetLang,
-      chapterCount: book.chapters.length,
-      translatedChapterCount: book.chapters.filter(
+      chapterCount: visibleChapters.length,
+      translatedChapterCount: visibleChapters.filter(
         (chapter) => chapter.status === ChapterStatus.DONE,
       ).length,
-      totalSegments: book.chapters.reduce(
+      totalSegments: visibleChapters.reduce(
         (sum, chapter) => sum + chapter.totalSegments,
         0,
       ),
-      completedSegments: book.chapters.reduce(
+      completedSegments: visibleChapters.reduce(
         (sum, chapter) => sum + chapter.completedSegments,
         0,
       ),
-      chapters: book.chapters.map((chapter) => ({
+      canManage,
+      chapters: visibleChapters.map((chapter) => ({
         id: chapter.id,
         bookId: chapter.bookId,
         chapterNumber: chapter.chapterNumber,

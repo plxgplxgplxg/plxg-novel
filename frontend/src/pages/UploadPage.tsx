@@ -207,7 +207,7 @@ const UploadPage = () => {
   return (
     <div className="upload-page">
       <div className="upload-back-link">
-        <Link to="/" style={{ color: 'var(--primary)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.875rem' }}>
+        <Link to="/" className="back-link">
           <ChevronLeft size={16} /> Dashboard
         </Link>
       </div>
@@ -217,8 +217,8 @@ const UploadPage = () => {
           <Upload size={24} color="var(--color-brand)" />
         </div>
         <div>
-          <h2 style={{ marginBottom: '0.25rem' }}>Upload Chương Truyện</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Hỗ trợ file .txt và .docx</p>
+          <h1>Upload Chương Truyện</h1>
+          <p>Hỗ trợ file .txt và .docx</p>
         </div>
       </div>
 
@@ -246,10 +246,10 @@ const UploadPage = () => {
       </div>
 
       <form onSubmit={handleSubmit}>
-        <div className="card" style={{ marginBottom: '1.5rem' }}>
+        <div className="card upload-book-card">
           {mode === 'new' ? (
-            <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-              <div className="input-group" style={{ marginBottom: 0 }}>
+            <div className="upload-book-grid">
+              <div className="input-group upload-inline-group">
                 <label>Tên tiếng Việt</label>
                 <input
                   className="input"
@@ -258,7 +258,7 @@ const UploadPage = () => {
                   onChange={e => setTitle(e.target.value)}
                 />
               </div>
-              <div className="input-group" style={{ marginBottom: 0 }}>
+              <div className="input-group upload-inline-group">
                 <label>Tên tiếng Trung (không bắt buộc)</label>
                 <input
                   className="input"
@@ -269,12 +269,12 @@ const UploadPage = () => {
               </div>
             </div>
           ) : (
-            <div className="input-group" style={{ marginBottom: 0 }}>
+            <div className="input-group upload-inline-group">
               <label>Chọn truyện</label>
               {books.length === 0 ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '1rem', background: 'rgba(99, 102, 241, 0.08)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                  <BookOpen size={18} color="var(--text-muted)" />
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Chưa có truyện nào. Hãy tạo truyện mới.</span>
+                <div className="inline-empty-hint">
+                  <BookOpen size={18} color="var(--color-text-secondary)" />
+                  <span>Chưa có truyện nào. Hãy tạo truyện mới.</span>
                 </div>
               ) : (
                 <select
@@ -288,7 +288,6 @@ const UploadPage = () => {
                     setError('');
                   }}
                   required
-                  style={{ cursor: 'pointer' }}
                 >
                   <option value="">-- Chọn truyện --</option>
                   {books.map((b: BookSummary) => (
@@ -303,8 +302,8 @@ const UploadPage = () => {
         <div className="card">
           <div className="upload-card-header">
             <div>
-              <h3 style={{ marginBottom: '0.25rem', fontSize: '1rem' }}>Danh sách chương</h3>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
+              <h3>Danh sách chương</h3>
+              <p className="supporting-copy">
                 Mỗi file là một hoặc nhiều chương. Backend sẽ tự tách theo pattern <code style={{ background: 'rgba(99,102,241,0.15)', padding: '0 4px', borderRadius: '4px' }}>第X章</code> / <code style={{ background: 'rgba(99,102,241,0.15)', padding: '0 4px', borderRadius: '4px' }}>Chapter X</code>
               </p>
             </div>
@@ -312,7 +311,6 @@ const UploadPage = () => {
               type="button"
               onClick={addSlot}
               className="btn btn-secondary"
-              style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
             >
               <Plus size={16} /> Thêm file
             </button>
@@ -343,8 +341,8 @@ const UploadPage = () => {
           <div className="card upload-existing-chapters-card">
             <div className="upload-card-header">
               <div>
-                <h3 style={{ marginBottom: '0.25rem', fontSize: '1rem' }}>Các chương hiện có</h3>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
+                <h3>Các chương hiện có</h3>
+                <p className="supporting-copy">
                   Sắp xếp theo chương mới nhất. Chọn file mới để upload lại, backend sẽ xóa segment cũ của chapter đó và dịch lại từ đầu.
                 </p>
               </div>
@@ -359,7 +357,6 @@ const UploadPage = () => {
                     setChapterPage(1);
                   }}
                   placeholder="Tìm theo tiêu đề chương..."
-                  style={{ marginBottom: 0 }}
                 />
               </div>
             </div>
@@ -388,7 +385,7 @@ const UploadPage = () => {
 
             <div className="upload-pagination">
               <span>{chapterListSummary}</span>
-              <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <div className="page-actions">
                 <button
                   type="button"
                   className="btn btn-secondary"
@@ -411,12 +408,12 @@ const UploadPage = () => {
         ) : null}
 
         {error && (
-          <div style={{ marginTop: '1rem', padding: '0.875rem 1rem', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px', color: '#f87171', fontSize: '0.875rem' }}>
+          <div className="form-error upload-error">
             {error}
           </div>
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
+        <div className="form-actions">
           <Link to="/" className="btn btn-secondary">Hủy</Link>
           <button type="submit" className="btn" disabled={isPending}>
             {isPending ? 'Đang upload...' : 'Upload và tự động dịch'}
@@ -472,17 +469,17 @@ const FileSlotRow = ({
 
       <div style={{ flex: 1, minWidth: 0 }}>
         {slot.file ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div className="file-inline-meta">
             <FileText size={16} color="var(--primary)" />
-            <span style={{ fontSize: '0.875rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span className="file-inline-name">
               {slot.file.name}
             </span>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+            <span className="file-inline-size">
               ({(slot.file.size / 1024).toFixed(1)} KB)
             </span>
           </div>
         ) : (
-          <span style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Chưa chọn file...</span>
+          <span className="file-inline-empty">Chưa chọn file...</span>
         )}
       </div>
 
@@ -500,7 +497,6 @@ const FileSlotRow = ({
         type="button"
         onClick={() => ref.current?.click()}
         className="btn btn-secondary"
-        style={{ padding: '0.375rem 0.75rem', fontSize: '0.8125rem', whiteSpace: 'nowrap' }}
       >
         {slot.file ? 'Đổi file' : 'Chọn file'}
       </button>
@@ -509,7 +505,7 @@ const FileSlotRow = ({
         <button
           type="button"
           onClick={onRemove}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '0.25rem', borderRadius: '4px', display: 'flex', alignItems: 'center' }}
+          className="icon-button"
         >
           <Trash2 size={16} />
         </button>

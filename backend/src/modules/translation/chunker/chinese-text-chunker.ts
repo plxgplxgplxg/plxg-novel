@@ -16,20 +16,26 @@ export class ChineseTextChunker implements IChunker {
       let buffer = '';
 
       for (const sentence of sentences) {
-        if (sentence.length > MAX_LEN) {
+        const normalizedSentence = sentence.trim();
+
+        if (!normalizedSentence) {
+          continue;
+        }
+
+        if (normalizedSentence.length > MAX_LEN) {
           if (buffer) {
             segments.push(buffer);
             buffer = '';
           }
-          segments.push(...this.hardSplit(sentence));
+          segments.push(...this.hardSplit(normalizedSentence));
           continue;
         }
 
-        if ((buffer + sentence).length <= MAX_LEN) {
-          buffer += sentence;
+        if ((buffer + normalizedSentence).length <= MAX_LEN) {
+          buffer += normalizedSentence;
         } else {
           if (buffer) segments.push(buffer);
-          buffer = sentence;
+          buffer = normalizedSentence;
         }
       }
 
@@ -47,11 +53,14 @@ export class ChineseTextChunker implements IChunker {
     while (remaining.length > MAX_LEN) {
       const commaIndex = remaining.lastIndexOf('，', MAX_LEN);
       const cutAt = commaIndex > 0 ? commaIndex + 1 : MAX_LEN;
-      parts.push(remaining.slice(0, cutAt));
-      remaining = remaining.slice(cutAt);
+      const part = remaining.slice(0, cutAt).trim();
+      if (part) {
+        parts.push(part);
+      }
+      remaining = remaining.slice(cutAt).trim();
     }
 
-    if (remaining) parts.push(remaining);
+    if (remaining.trim()) parts.push(remaining.trim());
 
     return parts;
   }

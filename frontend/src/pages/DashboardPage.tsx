@@ -1,11 +1,29 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createBookProgressStreamUrl, fetchBooks } from '../api';
 import { Link } from 'react-router-dom';
-import { BookOpen, Search, Plus } from 'lucide-react';
+import { BookOpen, BookText, Clock3, Search, Plus } from 'lucide-react';
 import type { BookSummary } from '../store';
 import { useEffect, useState } from 'react';
+import { useAuth } from '../auth/useAuth';
+
+const formatBookProgress = (book: BookSummary) => {
+  if (book.totalSegments === 0) {
+    return 0;
+  }
+
+  return Math.round((book.completedSegments / book.totalSegments) * 100);
+};
+
+const STATUS_LABELS: Record<BookSummary['status'], string> = {
+  draft: 'Nháp',
+  processing: 'Đang dịch',
+  partial: 'Một phần',
+  completed: 'Hoàn thành',
+  failed: 'Lỗi',
+};
 
 const DashboardPage = () => {
+  const { isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -15,12 +33,16 @@ const DashboardPage = () => {
     queryFn: () => fetchBooks({ search, page, pageSize: 9 }),
   });
   const books = data?.items ?? [];
+  const activeBooks = (data?.items ?? []).filter((book) =>
+    book.canManage && ['draft', 'processing'].includes(book.status),
+  );
+  const totalChapters = books.reduce((sum, book) => sum + book.chapterCount, 0);
+  const translatedChapters = books.reduce(
+    (sum, book) => sum + book.translatedChapterCount,
+    0,
+  );
 
   useEffect(() => {
-    const activeBooks = books.filter((book) =>
-      ['draft', 'processing'].includes(book.status),
-    );
-
     if (activeBooks.length === 0) {
       return;
     }
@@ -43,29 +65,64 @@ const DashboardPage = () => {
     return () => {
       streams.forEach((stream) => stream.close());
     };
-  }, [books, queryClient]);
+  }, [activeBooks, queryClient]);
 
   if (isLoading) {
-    return <div style={{ textAlign: 'center', padding: '4rem' }}>Loading...</div>;
+    return (
+      <div className="page-loading-state">
+        <div className="card loading-card">
+          <span className="eyebrow">Dashboard</span>
+          <h2>Đang tải thư viện</h2>
+          <p>Dữ liệu sách và tiến độ dịch đang được đồng bộ.</p>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+    <div className="page-stack">
+      <section className="page-hero">
         <div>
-          <h2>Thư viện truyện</h2>
-          <p style={{ color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-            Upload chương, dịch nền bằng worker và theo dõi tiến độ realtime.
+          <span className="eyebrow">Dashboard</span>
+          <h1>Thư viện truyện</h1>
+          <p>
+            Upload chương, dịch nền bằng worker và theo dõi tiến độ theo từng cuốn trong cùng một bảng điều phối.
           </p>
         </div>
-        <Link to="/upload" className="btn">
-          <Plus size={16} /> Upload truyện
-        </Link>
-      </div>
+        <div className="page-actions">
+          {isAuthenticated ? (
+            <Link to="/upload" className="btn">
+              <Plus size={16} /> Upload truyện
+            </Link>
+          ) : (
+            <Link to="/login" className="btn btn-secondary">
+              Đăng nhập để dịch
+            </Link>
+          )}
+        </div>
+      </section>
 
-      <div className="card" style={{ marginBottom: '1.5rem', padding: '1rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <Search size={18} color="var(--text-muted)" />
+      <section className="stats-grid">
+        <div className="card stat-card">
+          <span className="eyebrow">Tổng số</span>
+          <strong>{data?.totalItems ?? 0}</strong>
+          <span>Sách đang thuộc thư viện của công chúa.</span>
+        </div>
+        <div className="card stat-card">
+          <span className="eyebrow">Chương</span>
+          <strong>{totalChapters}</strong>
+          <span>Tổng số chương đã được upload vào hệ thống.</span>
+        </div>
+        <div className="card stat-card">
+          <span className="eyebrow">Đã dịch</span>
+          <strong>{translatedChapters}</strong>
+          <span>Số chương hiện đã ghép xong nội dung dịch.</span>
+        </div>
+      </section>
+
+      <section className="card filter-card">
+        <div className="search-field">
+          <Search size={18} color="var(--color-text-tertiary)" />
           <input
             className="input"
             value={search}
@@ -74,75 +131,78 @@ const DashboardPage = () => {
               setPage(1);
             }}
             placeholder="Tìm theo tên truyện..."
-            style={{ marginBottom: 0 }}
           />
         </div>
-      </div>
+      </section>
 
       {books.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
-          <BookOpen size={48} style={{ color: 'var(--text-muted)', marginBottom: '1rem' }} />
-          <h3>No books found</h3>
-          <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>Upload a Chinese novel to start translating.</p>
-        </div>
+        <section className="card empty-state">
+          <BookOpen size={48} />
+          <h3>Chưa có truyện nào</h3>
+          <p>Hãy upload bộ truyện đầu tiên để bắt đầu quy trình tách chương và dịch nền.</p>
+        </section>
       ) : (
         <>
-          <div className="grid">
+          <section className="book-grid">
             {books.map((book: BookSummary) => {
-            const progress = book.totalSegments === 0 ? 0 : Math.round((book.completedSegments / book.totalSegments) * 100);
-            return (
-              <div key={book.id} className="card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <h3 style={{ marginBottom: '0.25rem' }}>{book.title}</h3>
-                    <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>{book.originalTitle}</p>
-                  </div>
-                  <span className={`badge badge-${book.status}`}>{book.status}</span>
-                </div>
+              const progress = formatBookProgress(book);
 
-                <div style={{ marginTop: '1.5rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', marginBottom: '0.5rem' }}>
-                    <span>Overall Progress</span>
-                    <span>{progress}%</span>
+              return (
+                <article key={book.id} className="card book-card">
+                  <div className="book-card-header">
+                    <div>
+                      <h3>{book.title}</h3>
+                      <p>{book.originalTitle || 'Chưa có tên gốc'}</p>
+                    </div>
+                    <span className={`badge badge-${book.status}`}>
+                      {STATUS_LABELS[book.status]}
+                    </span>
                   </div>
-                  <div className="progress-bar-container">
-                    <div className="progress-bar" style={{ width: `${progress}%` }}></div>
-                  </div>
-                </div>
 
-                <div style={{ marginTop: '1rem', display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem', fontSize: '0.875rem' }}>
-                  <div>
-                    <div style={{ color: 'var(--text-muted)' }}>Số chương</div>
-                    <div>{book.chapterCount}</div>
+                  <div className="book-card-progress">
+                    <div className="book-card-progress-topline">
+                      <span>Tiến độ tổng</span>
+                      <span>{book.completedSegments}/{book.totalSegments} đoạn ({progress}%)</span>
+                    </div>
+                    <div className="progress-bar-container">
+                      <div className="progress-bar" style={{ width: `${progress}%` }} />
+                    </div>
                   </div>
-                  <div>
-                    <div style={{ color: 'var(--text-muted)' }}>Đã xong</div>
-                    <div>{book.translatedChapterCount}</div>
+
+                  <div className="book-card-stats">
+                    <div className="book-card-stat">
+                      <BookText size={16} />
+                      <div>
+                        <span>Chương</span>
+                        <strong>{book.chapterCount}</strong>
+                      </div>
+                    </div>
+                    <div className="book-card-stat">
+                      <Clock3 size={16} />
+                      <div>
+                        <span>Hoàn thành</span>
+                        <strong>{book.translatedChapterCount}</strong>
+                      </div>
+                    </div>
                   </div>
-                </div>
 
-                <div style={{ marginTop: '1.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <Link to={`/books/${book.id}`} className="btn" style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}>
-                    <BookOpen size={16} /> Xem chi tiết
-                  </Link>
-                  <Link
-                    to={`/upload?bookId=${book.id}`}
-                    className="btn btn-secondary"
-                    style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}
-                  >
-                    <Plus size={16} /> Thêm chương
-                  </Link>
-                </div>
-
-              </div>
-            );
+                  <div className="book-card-actions">
+                    <Link to={`/books/${book.id}`} className="btn">
+                      <BookOpen size={16} /> Xem chi tiết
+                    </Link>
+                    {book.canManage ? (
+                      <Link to={`/upload?bookId=${book.id}`} className="btn btn-secondary">
+                        <Plus size={16} /> Thêm chương
+                      </Link>
+                    ) : null}
+                  </div>
+                </article>
+              );
             })}
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem' }}>
-            <span style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-              {data?.totalItems ?? 0} truyện
-            </span>
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
+          </section>
+          <div className="pagination-bar">
+            <span>{data?.totalItems ?? 0} truyện</span>
+            <div className="page-actions">
               <button className="btn btn-secondary" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>
                 Trang trước
               </button>

@@ -13,6 +13,7 @@ export interface ChapterSummary {
   updatedAt?: string;
   sourceFileName?: string;
   sourceFileSize?: number;
+  canManage?: boolean;
 }
 
 export interface ChapterDetail extends ChapterSummary {
@@ -29,6 +30,7 @@ export interface BookSummary {
   totalSegments: number;
   completedSegments: number;
   createdAt?: string;
+  canManage?: boolean;
 }
 
 export interface BookDetail extends BookSummary {

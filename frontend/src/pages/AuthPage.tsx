@@ -81,7 +81,7 @@ const AuthPage = ({ mode }: { mode: AuthMode }) => {
       <div className="app-container">
         <section className="page-hero auth-hero">
           <div>
-            <span className="eyebrow">Library access</span>
+            <span className="eyebrow">Truy cập thư viện</span>
             <h1>{copy.title}</h1>
             <p>{copy.subtitle}</p>
           </div>
@@ -95,7 +95,7 @@ const AuthPage = ({ mode }: { mode: AuthMode }) => {
           <section className="card auth-form-card">
             <div className="auth-form-header">
               <span className="eyebrow">
-                {mode === 'login' ? 'Welcome back' : 'Create account'}
+                {mode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản'}
               </span>
               <h2>{copy.actionLabel}</h2>
               <p className="auth-form-description">

@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createBookProgressStreamUrl, fetchBookDetails, fetchChapter } from '../api';
-import { ChevronLeft, ChevronRight, List } from 'lucide-react';
+import { ChevronLeft, ChevronRight, List, LibraryBig } from 'lucide-react';
 
 const ReaderPage = () => {
   const { bookId, chapterId } = useParams<{ bookId: string; chapterId: string }>();
@@ -24,7 +24,7 @@ const ReaderPage = () => {
   });
 
   useEffect(() => {
-    if (!bookId) return;
+    if (!bookId || !book?.canManage) return;
 
     const stream = new EventSource(createBookProgressStreamUrl(bookId));
     stream.onmessage = () => {
@@ -40,18 +40,42 @@ const ReaderPage = () => {
     return () => {
       stream.close();
     };
-  }, [bookId, chapterId, queryClient]);
+  }, [book?.canManage, bookId, chapterId, queryClient]);
 
   if (isBookLoading) {
-    return <div style={{ textAlign: 'center', marginTop: '4rem' }}>Loading book...</div>;
+    return (
+      <div className="page-loading-state">
+        <div className="card loading-card">
+          <span className="eyebrow">Reader</span>
+          <h2>Đang tải chương truyện</h2>
+          <p>Nội dung đọc đang được lấy từ chapter đã dịch xong.</p>
+        </div>
+      </div>
+    );
   }
 
   if (!book) {
-    return <div style={{ textAlign: 'center', marginTop: '4rem' }}>Book not found.</div>;
+    return (
+      <div className="page-loading-state">
+        <div className="card loading-card">
+          <span className="eyebrow">Reader</span>
+          <h2>Không tìm thấy truyện</h2>
+          <p>Liên kết đọc này không còn hợp lệ.</p>
+        </div>
+      </div>
+    );
   }
 
   if (!book.chapters || book.chapters.length === 0) {
-    return <div style={{ textAlign: 'center', marginTop: '4rem' }}>No chapters available.</div>;
+    return (
+      <div className="page-loading-state">
+        <div className="card loading-card">
+          <span className="eyebrow">Reader</span>
+          <h2>Chưa có chương nào</h2>
+          <p>Cuốn truyện này chưa có nội dung để mở trong reader.</p>
+        </div>
+      </div>
+    );
   }
 
   const currentChapter = chapterDetail;
@@ -59,32 +83,43 @@ const ReaderPage = () => {
   const nextChapter = currentChapterIdx >= 0 && currentChapterIdx < book.chapters.length - 1 ? book.chapters[currentChapterIdx + 1] : undefined;
 
   if (!currentChapterMeta || !currentChapter) {
-    return <div style={{ textAlign: 'center', marginTop: '4rem' }}>Chapter not found or not ready.</div>;
+    return (
+      <div className="page-loading-state">
+        <div className="card loading-card">
+          <span className="eyebrow">Reader</span>
+          <h2>Chương chưa sẵn sàng</h2>
+          <p>Chương này chưa dịch xong hoặc không còn tồn tại.</p>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="reader-container">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border-color)' }}>
+      <div className="reader-header">
         <div>
-          <Link to="/" style={{ color: 'var(--primary)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.875rem', marginBottom: '0.5rem' }}>
-            <ChevronLeft size={16} /> Trang chủ
+          <Link to={`/books/${book.id}`} style={{ color: 'var(--primary)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.875rem', marginBottom: '0.5rem' }}>
+            <ChevronLeft size={16} /> Quay lại mục lục
           </Link>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: 600 }}>{book.title}</h2>
+          <h1>{book.title}</h1>
+          <p>{currentChapter.chapterNumber ? `Chương ${currentChapter.chapterNumber}` : ''}</p>
+        </div>
+        <div className="reader-index-pill">
+          <LibraryBig size={16} />
+          <span>{currentChapterIdx + 1} / {book.chapters.length}</span>
         </div>
       </div>
 
-      <div className="card" style={{ padding: '3rem' }}>
-        <h3 style={{ textAlign: 'center', fontSize: '1.75rem', marginBottom: '2rem', color: 'var(--primary)' }}>
+      <article className="card reader-card">
+        <h2 className="reader-chapter-title">
           {currentChapter.titleTranslated || currentChapter.titleOriginal}
-        </h3>
+        </h2>
 
-        <div className="reader-content">
-          <div style={{ whiteSpace: 'pre-wrap' }}>
-            {currentChapter.translatedContent || 'Nội dung trống.'}
-          </div>
+        <div className="reader-content reader-prose">
+          {currentChapter.translatedContent || 'Nội dung trống.'}
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4rem', paddingTop: '2rem', borderTop: '1px solid var(--border-color)' }}>
+        <div className="reader-footer">
           {prevChapter?.status === 'done' ? (
             <Link to={`/books/${book.id}/chapters/${prevChapter.id}`} className="btn btn-secondary">
               <ChevronLeft size={18} /> Chương trước
@@ -94,8 +129,8 @@ const ReaderPage = () => {
               <ChevronLeft size={18} /> Chương trước
             </button>
           )}
-          
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)' }}>
+
+          <div className="reader-position">
             <List size={18} /> {currentChapterIdx + 1} / {book.chapters.length}
           </div>
 
@@ -109,7 +144,7 @@ const ReaderPage = () => {
             </button>
           )}
         </div>
-      </div>
+      </article>
     </div>
   );
 };

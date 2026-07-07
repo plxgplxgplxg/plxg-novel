@@ -162,10 +162,19 @@ export class ChapterService {
     };
   }
 
-  async findOne(id: string, userId: string) {
-    const chapter = await this.findChapterForOwner(id, userId);
+  async findOne(id: string, userId: string | null) {
+    const chapter = await this.chapterRepo.findOne({
+      where: { id },
+      relations: { book: true },
+    });
 
-    if (chapter.status !== ChapterStatus.DONE) {
+    if (!chapter) {
+      throw new NotFoundException('Chapter not found');
+    }
+
+    const canManage = userId === chapter.book.userId;
+
+    if (!canManage && chapter.status !== ChapterStatus.DONE) {
       throw new ForbiddenException('Chapter is not ready to read');
     }
 
@@ -183,6 +192,7 @@ export class ChapterService {
       updatedAt: chapter.updatedAt,
       sourceFileName: chapter.sourceFileName,
       sourceFileSize: chapter.sourceFileSize,
+      canManage,
     };
   }
 

@@ -70,9 +70,13 @@ export class TranslationWorker extends WorkerHost {
     });
     if (!segment) return;
 
-    if (segment.sourceText === PARAGRAPH_MARKER) {
+    if (
+      segment.sourceText === PARAGRAPH_MARKER ||
+      segment.sourceText.trim().length === 0
+    ) {
       await this.segmentRepo.update(segmentId, {
-        translatedText: PARAGRAPH_MARKER,
+        translatedText:
+          segment.sourceText === PARAGRAPH_MARKER ? PARAGRAPH_MARKER : '',
         status: SegmentStatus.DONE,
       });
       await this.onSegmentCompleted(chapterId, chapterJobId, bookJobId);

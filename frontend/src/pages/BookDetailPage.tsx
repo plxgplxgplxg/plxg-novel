@@ -2,7 +2,23 @@ import { useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createBookProgressStreamUrl, fetchBookDetails } from '../api';
-import { ChevronLeft, BookOpen, ListOrdered } from 'lucide-react';
+import { ChevronLeft, BookOpen, ListOrdered, ScrollText } from 'lucide-react';
+
+const STATUS_LABELS = {
+  draft: 'Nháp',
+  processing: 'Đang dịch',
+  partial: 'Một phần',
+  completed: 'Hoàn thành',
+  failed: 'Lỗi',
+} as const;
+
+const CHAPTER_STATUS_LABELS = {
+  pending: 'Chờ xử lý',
+  splitting: 'Đang tách',
+  translating: 'Đang dịch',
+  done: 'Hoàn thành',
+  failed: 'Lỗi',
+} as const;
 
 const BookDetailPage = () => {
   const { bookId } = useParams<{ bookId: string }>();
@@ -15,7 +31,11 @@ const BookDetailPage = () => {
   });
 
   useEffect(() => {
-    if (!bookId || !book || !['draft', 'processing'].includes(book.status)) {
+    if (
+      !bookId ||
+      !book?.canManage ||
+      !['draft', 'processing'].includes(book.status)
+    ) {
       return;
     }
 
@@ -27,101 +47,143 @@ const BookDetailPage = () => {
     stream.onerror = () => stream.close();
 
     return () => stream.close();
-  }, [book, bookId, queryClient]);
+  }, [book?.canManage, book?.status, bookId, queryClient]);
 
   if (isLoading) {
-    return <div style={{ textAlign: 'center', marginTop: '4rem' }}>Loading book...</div>;
+    return (
+      <div className="page-loading-state">
+        <div className="card loading-card">
+          <span className="eyebrow">Book</span>
+          <h2>Đang tải thông tin truyện</h2>
+          <p>Hệ thống đang tổng hợp trạng thái chương và tiến độ dịch.</p>
+        </div>
+      </div>
+    );
   }
 
   if (!book) {
-    return <div style={{ textAlign: 'center', marginTop: '4rem' }}>Book not found.</div>;
+    return (
+      <div className="page-loading-state">
+        <div className="card loading-card">
+          <span className="eyebrow">Book</span>
+          <h2>Không tìm thấy truyện</h2>
+          <p>Cuốn truyện này không còn tồn tại hoặc bạn không có quyền truy cập.</p>
+        </div>
+      </div>
+    );
   }
 
+  const progress =
+    book.totalSegments === 0
+      ? 0
+      : Math.round((book.completedSegments / book.totalSegments) * 100);
+
   return (
-    <div>
-      <div style={{ marginBottom: '1.5rem' }}>
+    <div className="page-stack">
+      <div className="page-back-link">
         <Link to="/" style={{ color: 'var(--primary)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.875rem' }}>
           <ChevronLeft size={16} /> Trang chủ
         </Link>
       </div>
 
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start' }}>
+      <section className="page-hero">
+        <div>
+          <span className="eyebrow">Book detail</span>
+          <h1>{book.title}</h1>
+          <p>{book.originalTitle || 'Chưa có tên nguyên tác'}.</p>
+        </div>
+        <div className="page-actions">
+          {book.canManage ? (
+            <Link to={`/upload?bookId=${book.id}`} className="btn btn-secondary">
+              <ScrollText size={16} /> Quản lý chương
+            </Link>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="card detail-hero-card">
+        <div className="detail-hero-topline">
           <div>
-            <h2 style={{ marginBottom: '0.25rem' }}>{book.title}</h2>
-            <p style={{ color: 'var(--text-muted)' }}>{book.originalTitle}</p>
+            <span className="eyebrow">Trạng thái sách</span>
+            <h2>{STATUS_LABELS[book.status]}</h2>
           </div>
-          <span className={`badge badge-${book.status}`}>{book.status}</span>
+          <span className={`badge badge-${book.status}`}>{STATUS_LABELS[book.status]}</span>
         </div>
 
-        <div style={{ marginTop: '1.5rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', marginBottom: '0.5rem' }}>
+        <div className="detail-progress-block">
+          <div className="book-card-progress-topline">
             <span>Tiến độ dịch</span>
-            <span>
-              {book.completedSegments}/{book.totalSegments} segment
-            </span>
+            <span>{book.completedSegments}/{book.totalSegments} đoạn ({progress}%)</span>
           </div>
           <div className="progress-bar-container">
-            <div
-              className="progress-bar"
-              style={{
-                width: `${book.totalSegments === 0 ? 0 : Math.round((book.completedSegments / book.totalSegments) * 100)}%`,
-              }}
-            />
+            <div className="progress-bar" style={{ width: `${progress}%` }} />
           </div>
         </div>
-      </div>
 
-      <div className="card">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+        <div className="detail-summary-grid">
+          <div className="detail-summary-card">
+            <span className="eyebrow">Chương</span>
+            <strong>{book.chapterCount}</strong>
+          </div>
+          <div className="detail-summary-card">
+            <span className="eyebrow">Đã dịch</span>
+            <strong>{book.translatedChapterCount}</strong>
+          </div>
+          <div className="detail-summary-card">
+            <span className="eyebrow">Ngôn ngữ</span>
+            <strong>{book.sourceLang} → {book.targetLang}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="section-title">
           <ListOrdered size={18} />
           <h3>Mục lục chương</h3>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+        <div className="chapter-list">
           {book.chapters.map((chapter) => {
             const canRead = chapter.status === 'done';
             const chapterProgress = chapter.totalSegments === 0 ? 0 : Math.round((chapter.completedSegments / chapter.totalSegments) * 100);
 
             return (
-              <div
-                key={chapter.id}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: '1rem',
-                  padding: '0.875rem 1rem',
-                  background: 'rgba(15, 23, 42, 0.35)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '8px',
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 600 }}>
-                    Chương {chapter.chapterNumber}: {chapter.titleTranslated || chapter.titleOriginal}
+              <article key={chapter.id} className="chapter-row">
+                <div className="chapter-row-main">
+                  <div className="chapter-row-topline">
+                    <strong>
+                      Chương {chapter.chapterNumber}: {chapter.titleTranslated || chapter.titleOriginal}
+                    </strong>
+                    <span className={`badge badge-${chapter.status}`}>
+                      {CHAPTER_STATUS_LABELS[chapter.status]}
+                    </span>
                   </div>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '0.8125rem', marginTop: '0.25rem' }}>
-                    {chapter.completedSegments}/{chapter.totalSegments} segment · {chapter.status}
+                  <div className="chapter-row-meta">
+                    <span>{chapter.completedSegments}/{chapter.totalSegments} đoạn</span>
+                    <span>Cập nhật {chapter.updatedAt ? new Date(chapter.updatedAt).toLocaleDateString('vi-VN') : 'gần đây'}</span>
+                  </div>
+                  <div className="chapter-row-progress">
+                    <div className="progress-bar-container">
+                      <div className="progress-bar" style={{ width: `${chapterProgress}%` }} />
+                    </div>
+                    <span>{chapterProgress}%</span>
                   </div>
                 </div>
 
                 {canRead ? (
-                  <Link to={`/books/${book.id}/chapters/${chapter.id}`} className="btn" style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}>
+                  <Link to={`/books/${book.id}/chapters/${chapter.id}`} className="btn">
                     <BookOpen size={16} /> Đọc
                   </Link>
                 ) : (
-                  <div style={{ minWidth: '160px' }}>
-                    <div className="progress-bar-container">
-                      <div className="progress-bar" style={{ width: `${chapterProgress}%` }} />
-                    </div>
-                  </div>
+                  <button className="btn btn-secondary" disabled>
+                    Chưa sẵn sàng
+                  </button>
                 )}
-              </div>
+              </article>
             );
           })}
         </div>
-      </div>
+      </section>
     </div>
   );
 };

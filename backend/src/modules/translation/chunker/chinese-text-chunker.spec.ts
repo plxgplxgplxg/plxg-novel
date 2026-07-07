@@ -62,5 +62,11 @@ describe('ChineseTextChunker', () => {
       const result = chunker.chunk('   \n   \n   ');
       expect(result).toEqual([]);
     });
+
+    it('skips whitespace-only fragments around valid sentences', () => {
+      const text = '   第一句。   \n \n   第二句。   ';
+      const result = chunker.chunk(text);
+      expect(result.filter((segment) => segment.trim().length === 0 && segment !== '\n')).toEqual([]);
+    });
   });
 });

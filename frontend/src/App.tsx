@@ -6,10 +6,11 @@ import {
   NavLink,
   Navigate,
   Outlet,
+  Link,
   useLocation,
 } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BookOpen, LayoutDashboard, LogOut, Upload } from 'lucide-react';
+import { LayoutDashboard, LibraryBig, LogOut, Upload } from 'lucide-react';
 import UploadPage from './pages/UploadPage';
 import DashboardPage from './pages/DashboardPage';
 import ReaderPage from './pages/ReaderPage';
@@ -28,12 +29,12 @@ function App() {
           <Routes>
             <Route path="/login" element={<PublicOnlyRoute><AuthPage mode="login" /></PublicOnlyRoute>} />
             <Route path="/register" element={<PublicOnlyRoute><AuthPage mode="register" /></PublicOnlyRoute>} />
-            <Route element={<ProtectedRoute />}>
-              <Route element={<AppLayout />}>
-                <Route path="/" element={<DashboardPage />} />
+            <Route element={<AppLayout />}>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/books/:bookId" element={<BookDetailPage />} />
+              <Route path="/books/:bookId/chapters/:chapterId" element={<ReaderPage />} />
+              <Route element={<ProtectedRoute />}>
                 <Route path="/upload" element={<UploadPage />} />
-                <Route path="/books/:bookId" element={<BookDetailPage />} />
-                <Route path="/books/:bookId/chapters/:chapterId" element={<ReaderPage />} />
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
@@ -49,7 +50,7 @@ const ProtectedRoute = () => {
   const location = useLocation();
 
   if (!isReady) {
-    return <FullScreenState title="Dang xac thuc" description="Frontend dang kiem tra token va tai khoan hien tai." />;
+    return <FullScreenState title="Đang xác thực" description="Hệ thống đang kiểm tra phiên đăng nhập hiện tại." />;
   }
 
   if (!isAuthenticated) {
@@ -63,7 +64,7 @@ const PublicOnlyRoute = ({ children }: { children: ReactElement }) => {
   const { isAuthenticated, isReady } = useAuth();
 
   if (!isReady) {
-    return <FullScreenState title="Dang tai auth" description="Dang dong bo session hien co." />;
+    return <FullScreenState title="Đang tải phiên" description="Đang đồng bộ token và dữ liệu tài khoản." />;
   }
 
   if (isAuthenticated) {
@@ -74,20 +75,24 @@ const PublicOnlyRoute = ({ children }: { children: ReactElement }) => {
 };
 
 const AppLayout = () => {
-  const { logout, user } = useAuth();
+  const { logout, user, isAuthenticated } = useAuth();
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand-block">
           <div className="brand-mark">
-            <BookOpen size={18} />
+            <LibraryBig size={18} />
           </div>
           <div>
             <span className="eyebrow">Plxg Novel</span>
-            <h1>Translation Library</h1>
+            <h1>Thư viện dịch truyện</h1>
           </div>
         </div>
+
+        <p className="sidebar-copy">
+          Theo dõi toàn bộ tiến độ upload, tách chương và dịch nền trong một không gian đọc tĩnh tại.
+        </p>
 
         <nav className="sidebar-nav">
           <NavLink
@@ -98,24 +103,40 @@ const AppLayout = () => {
             <LayoutDashboard size={18} />
             <span>Dashboard</span>
           </NavLink>
-          <NavLink
-            to="/upload"
-            className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}
-          >
-            <Upload size={18} />
-            <span>Upload</span>
-          </NavLink>
+          {isAuthenticated ? (
+            <NavLink
+              to="/upload"
+              className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}
+            >
+              <Upload size={18} />
+              <span>Upload</span>
+            </NavLink>
+          ) : null}
         </nav>
 
         <div className="account-panel">
-          <div>
-            <span className="eyebrow">Signed in</span>
-            <strong>{user?.email}</strong>
-          </div>
-          <button type="button" className="btn btn-secondary" onClick={logout}>
-            <LogOut size={16} />
-            <span>Dang xuat</span>
-          </button>
+          {isAuthenticated ? (
+            <>
+              <div>
+                <span className="eyebrow">Đăng nhập</span>
+                <strong>{user?.email}</strong>
+              </div>
+              <button type="button" className="btn btn-secondary" onClick={logout}>
+                <LogOut size={16} />
+                <span>Đăng xuất</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <div>
+                <span className="eyebrow">Khách đọc</span>
+                <strong>Đọc công khai</strong>
+              </div>
+              <Link to="/login" className="btn btn-secondary">
+                <span>Đăng nhập để dịch</span>
+              </Link>
+            </>
+          )}
         </div>
       </aside>
 
