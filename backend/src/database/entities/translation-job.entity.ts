@@ -28,18 +28,18 @@ export class TranslationJob {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ name: 'bookId' })
+  @Column({ name: 'book_id' })
   bookId: string;
 
   @ManyToOne(() => Book, (book) => book.translationJobs)
-  @JoinColumn({ name: 'bookId' })
+  @JoinColumn({ name: 'book_id' })
   book: Book;
 
-  @Column({ name: 'chapterId', nullable: true })
+  @Column({ name: 'chapter_id', nullable: true })
   chapterId: string;
 
   @ManyToOne(() => Chapter, { nullable: true })
-  @JoinColumn({ name: 'chapterId' })
+  @JoinColumn({ name: 'chapter_id' })
   chapter: Chapter;
 
   @Column({ type: 'enum', enum: JobType })

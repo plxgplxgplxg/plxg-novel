@@ -23,11 +23,11 @@ export class Segment {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ name: 'chapterId' })
+  @Column({ name: 'chapter_id' })
   chapterId: string;
 
   @ManyToOne(() => Chapter, (chapter) => chapter.segments)
-  @JoinColumn({ name: 'chapterId' })
+  @JoinColumn({ name: 'chapter_id' })
   chapter: Chapter;
 
   @Column()
