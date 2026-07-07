@@ -13,6 +13,7 @@ import { QUEUE_CHAPTER_SPLIT, QUEUE_TRANSLATION } from './queue.constants';
           host: config.get('REDIS_HOST', 'localhost'),
           port: config.get<number>('REDIS_PORT', 6379),
           password: config.get('REDIS_PASSWORD'),
+          tls: config.get('REDIS_TLS') === 'true' ? {} : undefined,
         },
       }),
     }),

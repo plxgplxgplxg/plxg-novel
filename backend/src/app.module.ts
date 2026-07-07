@@ -31,6 +31,7 @@ import { ProgressModule } from './modules/progress/progress.module';
         entities: [User, Book, Chapter, Segment, TranslationJob],
         synchronize: config.get('NODE_ENV') !== 'production',
         logging: config.get('NODE_ENV') === 'development',
+        ssl: config.get('DB_SSL') === 'true' ? { rejectUnauthorized: false } : false,
       }),
     }),
     AuthModule,

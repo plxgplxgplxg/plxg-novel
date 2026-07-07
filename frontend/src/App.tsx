@@ -1,6 +1,8 @@
 import { BrowserRouter as Router, Routes, Route, NavLink } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Upload, LayoutDashboard } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { login } from './api';
 import UploadPage from './pages/UploadPage';
 import DashboardPage from './pages/DashboardPage';
 import ReaderPage from './pages/ReaderPage';
@@ -8,6 +10,14 @@ import ReaderPage from './pages/ReaderPage';
 const queryClient = new QueryClient();
 
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useEffect(() => {
+    login().then(() => setIsAuthenticated(true)).catch(console.error);
+  }, []);
+
+  if (!isAuthenticated) return <div>Authenticating...</div>;
+
   return (
     <QueryClientProvider client={queryClient}>
       <Router basename="/plxg-novel">

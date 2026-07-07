@@ -1,25 +1,51 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useAppStore } from '../store';
+import { useQuery } from '@tanstack/react-query';
+import { fetchBookDetails, fetchChapter } from '../api';
 import { ChevronLeft, ChevronRight, List } from 'lucide-react';
 
 const ReaderPage = () => {
   const { bookId } = useParams<{ bookId: string }>();
-  const book = useAppStore(state => state.books.find(b => b.id === bookId));
   const [currentChapterIdx, setCurrentChapterIdx] = useState(0);
+
+  const { data: book, isLoading: isBookLoading } = useQuery({
+    queryKey: ['book', bookId],
+    queryFn: () => fetchBookDetails(bookId!),
+    enabled: !!bookId,
+  });
+
+  const currentChapterMeta = book?.chapters?.[currentChapterIdx];
+
+  const { data: chapterDetail } = useQuery({
+    queryKey: ['chapter', currentChapterMeta?.id],
+    queryFn: () => fetchChapter(currentChapterMeta!.id),
+    enabled: !!currentChapterMeta?.id,
+    refetchInterval: (query) => {
+      // Poll if chapter is not done or failed
+      const status = query.state?.data?.status;
+      if (status === 'translating' || status === 'splitting' || status === 'pending') {
+        return 3000;
+      }
+      return false;
+    }
+  });
+
+  if (isBookLoading) {
+    return <div style={{ textAlign: 'center', marginTop: '4rem' }}>Loading book...</div>;
+  }
 
   if (!book) {
     return <div style={{ textAlign: 'center', marginTop: '4rem' }}>Book not found.</div>;
   }
 
-  if (book.chapters.length === 0) {
+  if (!book.chapters || book.chapters.length === 0) {
     return <div style={{ textAlign: 'center', marginTop: '4rem' }}>No chapters available.</div>;
   }
 
-  const currentChapter = book.chapters[currentChapterIdx];
+  const currentChapter = chapterDetail || currentChapterMeta!;
 
   const goNext = () => {
-    if (currentChapterIdx < book.chapters.length - 1) {
+    if (book.chapters && currentChapterIdx < book.chapters.length - 1) {
       setCurrentChapterIdx(prev => prev + 1);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -45,20 +71,20 @@ const ReaderPage = () => {
 
       <div className="card" style={{ padding: '3rem' }}>
         <h3 style={{ textAlign: 'center', fontSize: '1.75rem', marginBottom: '2rem', color: 'var(--primary)' }}>
-          {currentChapter.title_translated || currentChapter.title_original}
+          {currentChapter.titleTranslated || currentChapter.titleOriginal}
         </h3>
 
         <div className="reader-content">
           {currentChapter.status === 'done' ? (
             <div style={{ whiteSpace: 'pre-wrap' }}>
-              {currentChapter.translated_content || 'Nội dung đã được dịch (giả lập)...'}
+              {currentChapter.translatedContent || 'Nội dung đã được dịch.'}
             </div>
           ) : (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '4rem 0' }}>
               <div className="progress-bar-container" style={{ maxWidth: '300px', margin: '0 auto 1rem' }}>
-                <div className="progress-bar" style={{ width: `${(currentChapter.completed_segments / currentChapter.total_segments) * 100}%` }}></div>
+                <div className="progress-bar" style={{ width: `${((currentChapter.completedSegments || 0) / (currentChapter.totalSegments || 1)) * 100}%` }}></div>
               </div>
-              <p>Đang dịch ({currentChapter.completed_segments}/{currentChapter.total_segments})...</p>
+              <p>Đang dịch ({currentChapter.completedSegments || 0}/{currentChapter.totalSegments || 0})...</p>
             </div>
           )}
         </div>

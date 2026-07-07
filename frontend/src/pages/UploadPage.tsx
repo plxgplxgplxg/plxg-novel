@@ -1,43 +1,36 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAppStore } from '../store';
+import { useMutation } from '@tanstack/react-query';
+import { createBook, uploadChapters } from '../api';
 import { Upload, FileText } from 'lucide-react';
 
 const UploadPage = () => {
   const [title, setTitle] = useState('');
   const [originalTitle, setOriginalTitle] = useState('');
-  const [rawText, setRawText] = useState('');
+  const [file, setFile] = useState<File | null>(null);
   const navigate = useNavigate();
-  const addBook = useAppStore(state => state.addBook);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleUpload = (e: React.FormEvent) => {
+  const createBookMutation = useMutation({
+    mutationFn: (data: { title: string, originalTitle?: string }) => createBook(data.title, data.originalTitle)
+  });
+
+  const uploadMutation = useMutation({
+    mutationFn: (data: { bookId: string, file: File }) => uploadChapters(data.bookId, data.file)
+  });
+
+  const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title || !rawText) return;
+    if (!title || !file) return;
 
-    // Simulate simple chunking by chapters "第X章"
-    const chapters = rawText.split(/(?=第[一二三四五六七八九十百千万\d]+章)/g).filter(c => c.trim().length > 0);
-    
-    const newBook = {
-      id: Math.random().toString(36).substring(7),
-      title: title || 'Untitled',
-      original_title: originalTitle || 'Unknown',
-      status: 'draft' as const,
-      chapters: chapters.map((content, idx) => {
-        const firstLine = content.split('\n')[0];
-        const titleMatch = firstLine.match(/第.+?章.+/);
-        return {
-          id: Math.random().toString(36).substring(7),
-          chapter_number: idx + 1,
-          title_original: titleMatch ? titleMatch[0] : `Chapter ${idx + 1}`,
-          status: 'pending' as const,
-          total_segments: Math.max(10, Math.floor(content.length / 50)),
-          completed_segments: 0
-        };
-      })
-    };
-
-    addBook(newBook);
-    navigate('/');
+    try {
+      const book = await createBookMutation.mutateAsync({ title, originalTitle });
+      await uploadMutation.mutateAsync({ bookId: book.id, file });
+      navigate('/');
+    } catch (error) {
+      console.error('Upload failed', error);
+      alert('Upload failed. Please check backend logs.');
+    }
   };
 
   return (
@@ -74,21 +67,44 @@ const UploadPage = () => {
 
         <div className="input-group">
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <FileText size={16} /> Raw Text (Chinese)
+            <FileText size={16} /> Novel Text File (.txt)
           </label>
-          <textarea 
-            className="textarea" 
-            placeholder="Paste raw Chinese text here. Chapters should ideally start with 第X章..."
-            value={rawText}
-            onChange={e => setRawText(e.target.value)}
-            required
-            style={{ height: '300px' }}
-          ></textarea>
+          <div 
+            style={{ 
+              border: '2px dashed var(--border-color)', 
+              borderRadius: '8px', 
+              padding: '2rem', 
+              textAlign: 'center',
+              cursor: 'pointer'
+            }}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <input 
+              type="file" 
+              accept=".txt"
+              ref={fileInputRef}
+              style={{ display: 'none' }}
+              onChange={e => {
+                if (e.target.files && e.target.files.length > 0) {
+                  setFile(e.target.files[0]);
+                }
+              }}
+            />
+            {file ? (
+              <p style={{ color: 'var(--primary)' }}>Selected: {file.name}</p>
+            ) : (
+              <p style={{ color: 'var(--text-muted)' }}>Click to browse or drag and drop a .txt file</p>
+            )}
+          </div>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button type="submit" className="btn">
-            Create and Parse Book
+          <button 
+            type="submit" 
+            className="btn" 
+            disabled={createBookMutation.isPending || uploadMutation.isPending}
+          >
+            {(createBookMutation.isPending || uploadMutation.isPending) ? 'Uploading...' : 'Create and Upload'}
           </button>
         </div>
       </form>
