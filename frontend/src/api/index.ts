@@ -50,6 +50,10 @@ export const startTranslation = async (bookId: string) => {
   return res.data;
 };
 
+export const deleteBook = async (bookId: string) => {
+  await apiClient.delete(`/books/${bookId}`);
+};
+
 export const fetchChapter = async (chapterId: string): Promise<Chapter> => {
   const res = await apiClient.get(`/chapters/${chapterId}`);
   return res.data;

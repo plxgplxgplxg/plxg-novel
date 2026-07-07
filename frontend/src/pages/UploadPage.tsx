@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createBook, uploadChapters, fetchBooks } from '../api';
+import { createBook, uploadChapters, fetchBooks, deleteBook } from '../api';
 import { Upload, FileText, ChevronLeft, Plus, Trash2, BookOpen } from 'lucide-react';
 import type { Book } from '../store';
 
@@ -64,6 +64,7 @@ const UploadPage = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    let createdBookId: string | null = null;
 
     const filledSlots = slots.filter(s => s.file !== null);
     if (filledSlots.length === 0) {
@@ -78,6 +79,7 @@ const UploadPage = () => {
         if (!title) { setError('Nhập tên truyện.'); return; }
         const book = await createBookMutation.mutateAsync({ title, originalTitle });
         bookId = book.id;
+        createdBookId = book.id;
       }
 
       await Promise.all(
@@ -87,6 +89,15 @@ const UploadPage = () => {
       queryClient.invalidateQueries({ queryKey: ['books'] });
       navigate('/');
     } catch (err: any) {
+      if (createdBookId) {
+        try {
+          await deleteBook(createdBookId);
+          queryClient.invalidateQueries({ queryKey: ['books'] });
+        } catch {
+          // Ignore cleanup failure and preserve original upload error.
+        }
+      }
+
       setError(err?.response?.data?.message || 'Upload thất bại. Kiểm tra backend logs.');
     }
   };

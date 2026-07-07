@@ -3,9 +3,11 @@ import { fetchBooks, startTranslation } from '../api';
 import { Link } from 'react-router-dom';
 import { Play, RotateCw, BookOpen, AlertCircle, Plus } from 'lucide-react';
 import type { Book } from '../store'; // Just for types
+import { useState } from 'react';
 
 const DashboardPage = () => {
   const queryClient = useQueryClient();
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const { data: books = [], isLoading } = useQuery({
     queryKey: ['books'],
@@ -16,7 +18,11 @@ const DashboardPage = () => {
   const translateMutation = useMutation({
     mutationFn: startTranslation,
     onSuccess: () => {
+      setActionError(null);
       queryClient.invalidateQueries({ queryKey: ['books'] });
+    },
+    onError: (error: any) => {
+      setActionError(error?.response?.data?.message || 'Start translation failed.');
     },
   });
 
@@ -40,11 +46,30 @@ const DashboardPage = () => {
           <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>Upload a Chinese novel to start translating.</p>
         </div>
       ) : (
-        <div className="grid">
-          {books.map((book: Book) => {
+        <>
+          {actionError && (
+            <div
+              style={{
+                marginBottom: '1rem',
+                padding: '0.875rem 1rem',
+                background: 'rgba(239, 68, 68, 0.12)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: '8px',
+                color: '#f87171',
+                fontSize: '0.875rem',
+              }}
+            >
+              {actionError}
+            </div>
+          )}
+          <div className="grid">
+            {books.map((book: Book) => {
             const totalSegments = book.chapters?.reduce((acc, c) => acc + (c.totalSegments || 0), 0) || 0;
             const completedSegments = book.chapters?.reduce((acc, c) => acc + (c.completedSegments || 0), 0) || 0;
             const progress = totalSegments === 0 ? 0 : Math.round((completedSegments / totalSegments) * 100);
+            const hasChapters = (book.chapters?.length || 0) > 0;
+            const isTranslatingThisBook =
+              translateMutation.isPending && translateMutation.variables === book.id;
 
             return (
               <div key={book.id} className="card">
@@ -69,13 +94,17 @@ const DashboardPage = () => {
                 <div style={{ marginTop: '1.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   {book.status === 'draft' && (
                     <button
-                      onClick={() => translateMutation.mutate(book.id)}
+                      onClick={() => {
+                        setActionError(null);
+                        translateMutation.mutate(book.id);
+                      }}
                       className="btn btn-secondary"
                       style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
-                      disabled={translateMutation.isPending}
+                      disabled={isTranslatingThisBook || !hasChapters}
+                      title={hasChapters ? undefined : 'Thêm ít nhất một chương trước khi dịch'}
                     >
-                      {translateMutation.isPending ? <RotateCw size={16} className="spin" /> : <Play size={16} />}
-                      Start Translation
+                      {isTranslatingThisBook ? <RotateCw size={16} className="spin" /> : <Play size={16} />}
+                      {hasChapters ? 'Start Translation' : 'Chưa có chương'}
                     </button>
                   )}
                   {(book.status === 'partial' || book.status === 'completed') && (
@@ -115,8 +144,9 @@ const DashboardPage = () => {
                 </div>
               </div>
             );
-          })}
-        </div>
+            })}
+          </div>
+        </>
       )}
       <style>{`
         .spin { animation: spin 2s linear infinite; }
