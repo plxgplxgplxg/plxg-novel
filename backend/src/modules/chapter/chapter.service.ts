@@ -1,7 +1,6 @@
 import {
   Injectable,
   NotFoundException,
-  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -35,7 +34,11 @@ export class ChapterService {
     private readonly translationQueue: Queue,
   ) {}
 
-  async addChapter(bookId: string, userId: string, dto: CreateChapterDto): Promise<Chapter> {
+  async addChapter(
+    bookId: string,
+    userId: string,
+    dto: CreateChapterDto,
+  ): Promise<Chapter> {
     await this.assertBookOwnership(bookId, userId);
 
     const chapter = this.chapterRepo.create({
@@ -56,10 +59,23 @@ export class ChapterService {
   ): Promise<Chapter[]> {
     await this.assertBookOwnership(bookId, userId);
 
-    const chapterBlocks = this.extractChaptersFromText(fileContent);
+    let chapterBlocks = this.extractChaptersFromText(fileContent);
 
     if (chapterBlocks.length === 0) {
-      throw new BadRequestException('No chapters found in uploaded file');
+      const lastChapter = await this.chapterRepo.findOne({
+        where: { bookId },
+        order: { chapterNumber: 'DESC' },
+      });
+
+      const nextChapterNumber = lastChapter ? lastChapter.chapterNumber + 1 : 1;
+
+      chapterBlocks = [
+        {
+          number: nextChapterNumber,
+          title: `Chapter ${nextChapterNumber}`,
+          content: fileContent.trim(),
+        },
+      ];
     }
 
     const chapters = chapterBlocks.map((block) =>
@@ -87,14 +103,20 @@ export class ChapterService {
     return chapter;
   }
 
-  async retranslateChapter(id: string, userId: string): Promise<{ jobId: string }> {
+  async retranslateChapter(
+    id: string,
+    userId: string,
+  ): Promise<{ jobId: string }> {
     const chapter = await this.findOne(id, userId);
 
     const failedSegments = await this.segmentRepo.find({
       where: { chapterId: id, status: SegmentStatus.FAILED },
     });
 
-    if (failedSegments.length === 0 && chapter.status !== ChapterStatus.PENDING) {
+    if (
+      failedSegments.length === 0 &&
+      chapter.status !== ChapterStatus.PENDING
+    ) {
       await this.splitQueue.add(
         'split-chapter',
         { chapterId: id },
@@ -106,7 +128,11 @@ export class ChapterService {
     if (failedSegments.length > 0) {
       await this.segmentRepo.update(
         failedSegments.map((s) => s.id),
-        { status: SegmentStatus.PENDING, retryCount: 0, errorMessage: undefined },
+        {
+          status: SegmentStatus.PENDING,
+          retryCount: 0,
+          errorMessage: undefined,
+        },
       );
 
       const retryJobs = failedSegments.map((seg) => ({
@@ -121,7 +147,10 @@ export class ChapterService {
     return { jobId: id };
   }
 
-  private async assertBookOwnership(bookId: string, userId: string): Promise<void> {
+  private async assertBookOwnership(
+    bookId: string,
+    userId: string,
+  ): Promise<void> {
     const book = await this.bookRepo.findOne({ where: { id: bookId, userId } });
     if (!book) throw new NotFoundException('Book not found');
   }
@@ -130,8 +159,13 @@ export class ChapterService {
     text: string,
   ): Array<{ number: number; title: string; content: string }> {
     const lines = text.split('\n');
-    const chapters: Array<{ number: number; title: string; content: string }> = [];
-    let currentChapter: { number: number; title: string; lines: string[] } | null = null;
+    const chapters: Array<{ number: number; title: string; content: string }> =
+      [];
+    let currentChapter: {
+      number: number;
+      title: string;
+      lines: string[];
+    } | null = null;
 
     for (const line of lines) {
       const match = CHAPTER_NUMBER_PATTERN.exec(line);

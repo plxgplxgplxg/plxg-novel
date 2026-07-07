@@ -1,4 +1,11 @@
-import { Controller, Post, Param, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Param,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { SegmentService } from './segment.service';
 import { CurrentUser } from '../shared/decorators/current-user.decorator';

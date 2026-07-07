@@ -19,7 +19,11 @@ export class HFInferenceProvider implements ITranslationProvider {
     return this.configService.get<string>('HF_ENDPOINT', DEFAULT_ENDPOINT);
   }
 
-  async translate(text: string, _sourceLang: string, _targetLang: string): Promise<string> {
+  async translate(
+    text: string,
+    _sourceLang: string,
+    _targetLang: string,
+  ): Promise<string> {
     const token = this.configService.get<string>('HF_TOKEN');
     const res = await fetch(this.getEndpoint(), {
       method: 'POST',
@@ -44,7 +48,11 @@ export class HFInferenceProvider implements ITranslationProvider {
     return result;
   }
 
-  async translateBatch(texts: string[], sourceLang: string, targetLang: string): Promise<string[]> {
+  async translateBatch(
+    texts: string[],
+    sourceLang: string,
+    targetLang: string,
+  ): Promise<string[]> {
     const results: string[] = [];
 
     for (let i = 0; i < texts.length; i += MAX_BATCH_SIZE) {

@@ -7,10 +7,7 @@ import { SegmentController } from './segment.controller';
 import { QueuesModule } from '../../queue/queues.module';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Segment, Chapter]),
-    QueuesModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Segment, Chapter]), QueuesModule],
   providers: [SegmentService],
   controllers: [SegmentController],
 })

@@ -5,7 +5,10 @@ import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Inject, Logger } from '@nestjs/common';
-import { Chapter, ChapterStatus } from '../../../database/entities/chapter.entity';
+import {
+  Chapter,
+  ChapterStatus,
+} from '../../../database/entities/chapter.entity';
 import { Segment } from '../../../database/entities/segment.entity';
 import type { IChunker } from '../interfaces/chunker.interface';
 import { CHUNKER } from '../interfaces/chunker.interface';
@@ -41,13 +44,17 @@ export class ChapterSplitWorker extends WorkerHost {
   async process(job: Job<ChapterSplitJobPayload>): Promise<void> {
     const { chapterId } = job.data;
 
-    const chapter = await this.chapterRepo.findOne({ where: { id: chapterId } });
+    const chapter = await this.chapterRepo.findOne({
+      where: { id: chapterId },
+    });
     if (!chapter) {
       this.logger.warn(`Chapter ${chapterId} not found, skipping`);
       return;
     }
 
-    await this.chapterRepo.update(chapterId, { status: ChapterStatus.SPLITTING });
+    await this.chapterRepo.update(chapterId, {
+      status: ChapterStatus.SPLITTING,
+    });
 
     const rawSegments = this.chunker.chunk(chapter.rawContent);
 
@@ -57,7 +64,11 @@ export class ChapterSplitWorker extends WorkerHost {
     });
 
     const segmentEntities = rawSegments.map((text, index) =>
-      this.segmentRepo.create({ chapterId, segmentIndex: index, sourceText: text }),
+      this.segmentRepo.create({
+        chapterId,
+        segmentIndex: index,
+        sourceText: text,
+      }),
     );
 
     const savedSegments = await this.segmentRepo.save(segmentEntities);
@@ -73,6 +84,8 @@ export class ChapterSplitWorker extends WorkerHost {
 
     await this.translationQueue.addBulk(translationJobs);
 
-    this.logger.log(`Chapter ${chapterId} split into ${rawSegments.length} segments`);
+    this.logger.log(
+      `Chapter ${chapterId} split into ${rawSegments.length} segments`,
+    );
   }
 }

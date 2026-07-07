@@ -39,7 +39,9 @@ export class ProgressController {
     @CurrentUser() user: JwtPayload,
     @Res() res: Response,
   ): Promise<void> {
-    const book = await this.bookRepo.findOne({ where: { id: bookId, userId: user.sub } });
+    const book = await this.bookRepo.findOne({
+      where: { id: bookId, userId: user.sub },
+    });
     if (!book) throw new NotFoundException('Book not found');
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -53,7 +55,9 @@ export class ProgressController {
     this.sseClients.set(bookId, clients);
 
     res.on('close', () => {
-      const remaining = (this.sseClients.get(bookId) ?? []).filter((c) => c !== res);
+      const remaining = (this.sseClients.get(bookId) ?? []).filter(
+        (c) => c !== res,
+      );
       if (remaining.length === 0) {
         this.sseClients.delete(bookId);
       } else {

@@ -5,7 +5,11 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Segment, SegmentStatus } from '../../database/entities/segment.entity';
 import { Chapter } from '../../database/entities/chapter.entity';
-import { QUEUE_TRANSLATION, BULLMQ_BACKOFF_CONFIG, MAX_RETRY_ATTEMPTS } from '../../queue/queue.constants';
+import {
+  QUEUE_TRANSLATION,
+  BULLMQ_BACKOFF_CONFIG,
+  MAX_RETRY_ATTEMPTS,
+} from '../../queue/queue.constants';
 
 @Injectable()
 export class SegmentService {

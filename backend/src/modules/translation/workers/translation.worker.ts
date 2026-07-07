@@ -4,8 +4,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Chapter, ChapterStatus } from '../../../database/entities/chapter.entity';
-import { Segment, SegmentStatus } from '../../../database/entities/segment.entity';
+import {
+  Chapter,
+  ChapterStatus,
+} from '../../../database/entities/chapter.entity';
+import {
+  Segment,
+  SegmentStatus,
+} from '../../../database/entities/segment.entity';
 import { Book, BookStatus } from '../../../database/entities/book.entity';
 import type { ITranslationProvider } from '../interfaces/translation-provider.interface';
 import { TRANSLATION_PROVIDER } from '../interfaces/translation-provider.interface';
@@ -39,7 +45,9 @@ export class TranslationWorker extends WorkerHost {
     @InjectRepository(Book)
     private readonly bookRepo: Repository<Book>,
     @Inject(TRANSLATION_PROVIDER)
-    private readonly translationProvider: { translate: ITranslationProvider['translate'] },
+    private readonly translationProvider: {
+      translate: ITranslationProvider['translate'];
+    },
     private readonly dataSource: DataSource,
     private readonly eventEmitter: EventEmitter2,
   ) {
@@ -49,7 +57,9 @@ export class TranslationWorker extends WorkerHost {
   async process(job: Job<TranslationJobPayload>): Promise<void> {
     const { segmentId, chapterId } = job.data;
 
-    const segment = await this.segmentRepo.findOne({ where: { id: segmentId } });
+    const segment = await this.segmentRepo.findOne({
+      where: { id: segmentId },
+    });
     if (!segment) return;
 
     if (segment.sourceText === PARAGRAPH_MARKER) {
@@ -61,7 +71,9 @@ export class TranslationWorker extends WorkerHost {
       return;
     }
 
-    await this.segmentRepo.update(segmentId, { status: SegmentStatus.TRANSLATING });
+    await this.segmentRepo.update(segmentId, {
+      status: SegmentStatus.TRANSLATING,
+    });
 
     try {
       const translated = await this.translationProvider.translate(
@@ -105,10 +117,17 @@ export class TranslationWorker extends WorkerHost {
 
   private async onSegmentCompleted(chapterId: string): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
-      await manager.increment(Chapter, { id: chapterId }, 'completedSegments', 1);
+      await manager.increment(
+        Chapter,
+        { id: chapterId },
+        'completedSegments',
+        1,
+      );
     });
 
-    const chapter = await this.chapterRepo.findOne({ where: { id: chapterId } });
+    const chapter = await this.chapterRepo.findOne({
+      where: { id: chapterId },
+    });
     if (!chapter) return;
 
     const allProcessed = chapter.completedSegments >= chapter.totalSegments;
@@ -117,7 +136,9 @@ export class TranslationWorker extends WorkerHost {
         chapterId,
         completed: chapter.completedSegments,
         total: chapter.totalSegments,
-        percent: Math.floor((chapter.completedSegments / chapter.totalSegments) * 100),
+        percent: Math.floor(
+          (chapter.completedSegments / chapter.totalSegments) * 100,
+        ),
       });
       return;
     }
@@ -131,11 +152,15 @@ export class TranslationWorker extends WorkerHost {
       order: { segmentIndex: 'ASC' },
     });
 
-    const failedCount = segments.filter((s) => s.status === SegmentStatus.FAILED).length;
+    const failedCount = segments.filter(
+      (s) => s.status === SegmentStatus.FAILED,
+    ).length;
     const failedPercent = failedCount / segments.length;
 
     const translatedContent = segments
-      .map((s) => (s.sourceText === PARAGRAPH_MARKER ? '\n\n' : (s.translatedText ?? '')))
+      .map((s) =>
+        s.sourceText === PARAGRAPH_MARKER ? '\n\n' : (s.translatedText ?? ''),
+      )
       .join('');
 
     const newStatus =
@@ -147,7 +172,9 @@ export class TranslationWorker extends WorkerHost {
       this.logger.error(
         `Chapter ${chapter.id} has ${segments.length} segments but expected ${chapter.totalSegments}`,
       );
-      await this.chapterRepo.update(chapter.id, { status: ChapterStatus.FAILED });
+      await this.chapterRepo.update(chapter.id, {
+        status: ChapterStatus.FAILED,
+      });
       return;
     }
 

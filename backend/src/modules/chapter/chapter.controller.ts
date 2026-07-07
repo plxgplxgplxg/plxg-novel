@@ -52,7 +52,11 @@ export class ChapterController {
       throw new BadRequestException('Only .txt and .docx files are supported');
     }
 
-    return this.chapterService.uploadAndSplitChapters(bookId, user.sub, content);
+    return this.chapterService.uploadAndSplitChapters(
+      bookId,
+      user.sub,
+      content,
+    );
   }
 
   @Get('chapters/:id')

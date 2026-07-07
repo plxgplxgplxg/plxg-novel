@@ -9,7 +9,11 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Book, BookStatus } from '../../database/entities/book.entity';
 import { Chapter, ChapterStatus } from '../../database/entities/chapter.entity';
-import { TranslationJob, JobType, JobStatus } from '../../database/entities/translation-job.entity';
+import {
+  TranslationJob,
+  JobType,
+  JobStatus,
+} from '../../database/entities/translation-job.entity';
 import { CreateBookDto } from './dto/create-book.dto';
 import {
   QUEUE_CHAPTER_SPLIT,
@@ -65,7 +69,10 @@ export class BookService {
     return book;
   }
 
-  async startTranslation(id: string, userId: string): Promise<{ jobId: string }> {
+  async startTranslation(
+    id: string,
+    userId: string,
+  ): Promise<{ jobId: string }> {
     const book = await this.bookRepo.findOne({
       where: { id, userId },
       relations: { chapters: true },
@@ -73,7 +80,8 @@ export class BookService {
     if (!book) throw new NotFoundException('Book not found');
 
     const pendingChapters = book.chapters.filter(
-      (c) => c.status === ChapterStatus.PENDING || c.status === ChapterStatus.FAILED,
+      (c) =>
+        c.status === ChapterStatus.PENDING || c.status === ChapterStatus.FAILED,
     );
 
     if (pendingChapters.length === 0) {

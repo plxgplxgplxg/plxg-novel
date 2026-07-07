@@ -8,10 +8,7 @@ import { ChapterController } from './chapter.controller';
 import { QueuesModule } from '../../queue/queues.module';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Chapter, Segment, Book]),
-    QueuesModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Chapter, Segment, Book]), QueuesModule],
   providers: [ChapterService],
   controllers: [ChapterController],
   exports: [ChapterService],

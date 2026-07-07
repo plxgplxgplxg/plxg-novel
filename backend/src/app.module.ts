@@ -31,7 +31,11 @@ import { ProgressModule } from './modules/progress/progress.module';
         entities: [User, Book, Chapter, Segment, TranslationJob],
         synchronize: config.get('NODE_ENV') !== 'production',
         logging: config.get('NODE_ENV') === 'development',
-        ssl: (config.get('DB_SSL') === 'true' || config.get('DB_HOST', '').includes('aivencloud.com')) ? { rejectUnauthorized: false } : false,
+        ssl:
+          config.get('DB_SSL') === 'true' ||
+          config.get('DB_HOST', '').includes('aivencloud.com')
+            ? { rejectUnauthorized: false }
+            : false,
       }),
     }),
     AuthModule,

@@ -1,4 +1,8 @@
-import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  ConflictException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
@@ -18,7 +22,9 @@ export class AuthService {
   ) {}
 
   async register(dto: RegisterDto): Promise<{ accessToken: string }> {
-    const existing = await this.userRepo.findOne({ where: { email: dto.email } });
+    const existing = await this.userRepo.findOne({
+      where: { email: dto.email },
+    });
     if (existing) throw new ConflictException('Email already registered');
 
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS);
