@@ -133,6 +133,7 @@ export class TranslationWorker extends WorkerHost {
     const allProcessed = chapter.completedSegments >= chapter.totalSegments;
     if (!allProcessed) {
       this.eventEmitter.emit('chapter.progress', {
+        bookId: chapter.bookId,
         chapterId,
         completed: chapter.completedSegments,
         total: chapter.totalSegments,
@@ -186,6 +187,7 @@ export class TranslationWorker extends WorkerHost {
     await this.updateBookStatus(chapter.bookId);
 
     this.eventEmitter.emit('chapter.progress', {
+      bookId: chapter.bookId,
       chapterId: chapter.id,
       completed: chapter.totalSegments,
       total: chapter.totalSegments,

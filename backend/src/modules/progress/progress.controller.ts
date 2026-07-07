@@ -16,6 +16,7 @@ import { CurrentUser } from '../shared/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/jwt-payload.interface';
 
 interface ChapterProgressEvent {
+  bookId: string;
   chapterId: string;
   completed: number;
   total: number;
@@ -68,17 +69,22 @@ export class ProgressController {
 
   @OnEvent('chapter.progress')
   handleChapterProgress(event: ChapterProgressEvent): void {
-    for (const [bookId, clients] of this.sseClients.entries()) {
-      const alive: Response[] = [];
-      for (const client of clients) {
-        try {
-          client.write(`data: ${JSON.stringify({ bookId, ...event })}\n\n`);
-          alive.push(client);
-        } catch {
-          // Client disconnected
-        }
+    const clients = this.sseClients.get(event.bookId) ?? [];
+    const alive: Response[] = [];
+
+    for (const client of clients) {
+      try {
+        client.write(`data: ${JSON.stringify(event)}\n\n`);
+        alive.push(client);
+      } catch {
+        // Client disconnected
       }
-      this.sseClients.set(bookId, alive);
+    }
+
+    if (alive.length === 0) {
+      this.sseClients.delete(event.bookId);
+    } else {
+      this.sseClients.set(event.bookId, alive);
     }
   }
 }

@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = 'https://plxg-novel-backend-production.up.railway.app';
+export const API_URL = 'https://plxg-novel-backend-production.up.railway.app';
 
 export const apiClient = axios.create({
   baseURL: API_URL,

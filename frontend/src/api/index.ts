@@ -1,4 +1,4 @@
-import { apiClient } from './client';
+import { apiClient, API_URL } from './client';
 import type { Book, Chapter } from '../store';
 
 export const login = async () => {
@@ -52,6 +52,15 @@ export const startTranslation = async (bookId: string) => {
 
 export const deleteBook = async (bookId: string) => {
   await apiClient.delete(`/books/${bookId}`);
+};
+
+export const createBookProgressStreamUrl = (bookId: string) => {
+  const token = localStorage.getItem('token');
+  const url = new URL(`/books/${bookId}/progress-stream`, API_URL);
+  if (token) {
+    url.searchParams.set('token', token);
+  }
+  return url.toString();
 };
 
 export const fetchChapter = async (chapterId: string): Promise<Chapter> => {

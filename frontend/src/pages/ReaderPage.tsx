@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { fetchBookDetails, fetchChapter } from '../api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { createBookProgressStreamUrl, fetchBookDetails, fetchChapter } from '../api';
 import { ChevronLeft, ChevronRight, List } from 'lucide-react';
 
 const ReaderPage = () => {
   const { bookId } = useParams<{ bookId: string }>();
   const [currentChapterIdx, setCurrentChapterIdx] = useState(0);
+  const queryClient = useQueryClient();
 
   const { data: book, isLoading: isBookLoading } = useQuery({
     queryKey: ['book', bookId],
@@ -20,15 +21,26 @@ const ReaderPage = () => {
     queryKey: ['chapter', currentChapterMeta?.id],
     queryFn: () => fetchChapter(currentChapterMeta!.id),
     enabled: !!currentChapterMeta?.id,
-    refetchInterval: (query) => {
-      // Poll if chapter is not done or failed
-      const status = query.state?.data?.status;
-      if (status === 'translating' || status === 'splitting' || status === 'pending') {
-        return 3000;
-      }
-      return false;
-    }
   });
+
+  useEffect(() => {
+    if (!bookId) return;
+
+    const stream = new EventSource(createBookProgressStreamUrl(bookId));
+    stream.onmessage = () => {
+      queryClient.invalidateQueries({ queryKey: ['book', bookId] });
+      if (currentChapterMeta?.id) {
+        queryClient.invalidateQueries({ queryKey: ['chapter', currentChapterMeta.id] });
+      }
+    };
+    stream.onerror = () => {
+      stream.close();
+    };
+
+    return () => {
+      stream.close();
+    };
+  }, [bookId, currentChapterMeta?.id, queryClient]);
 
   if (isBookLoading) {
     return <div style={{ textAlign: 'center', marginTop: '4rem' }}>Loading book...</div>;

@@ -1,9 +1,10 @@
 import {
   Injectable,
   NotFoundException,
+  ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Chapter, ChapterStatus } from '../../database/entities/chapter.entity';
@@ -17,7 +18,7 @@ import {
   MAX_RETRY_ATTEMPTS,
 } from '../../queue/queue.constants';
 
-const CHAPTER_NUMBER_PATTERN = /第(\d+)章|Chapter\s+(\d+)/gi;
+const CHAPTER_NUMBER_PATTERN = /^((第[一二三四五六七八九十百千万零两\d]+章)|Chapter\s+(\d+))/i;
 
 @Injectable()
 export class ChapterService {
@@ -87,7 +88,16 @@ export class ChapterService {
       }),
     );
 
-    return this.chapterRepo.save(chapters);
+    try {
+      return await this.chapterRepo.save(chapters);
+    } catch (error) {
+      if (this.isDuplicateChapterNumberError(error)) {
+        throw new ConflictException(
+          'Chapter number already exists in this book. Upload files one by one or rename chapter headings.',
+        );
+      }
+      throw error;
+    }
   }
 
   async findOne(id: string, userId: string): Promise<Chapter> {
@@ -168,8 +178,7 @@ export class ChapterService {
     } | null = null;
 
     for (const line of lines) {
-      const match = CHAPTER_NUMBER_PATTERN.exec(line);
-      CHAPTER_NUMBER_PATTERN.lastIndex = 0;
+      const match = line.trim().match(CHAPTER_NUMBER_PATTERN);
 
       if (match) {
         if (currentChapter) {
@@ -180,7 +189,7 @@ export class ChapterService {
           });
         }
 
-        const chapterNum = parseInt(match[1] || match[2], 10);
+        const chapterNum = this.parseChapterNumber(match[2] || match[3]);
         currentChapter = { number: chapterNum, title: line.trim(), lines: [] };
       } else if (currentChapter) {
         currentChapter.lines.push(line);
@@ -196,5 +205,69 @@ export class ChapterService {
     }
 
     return chapters;
+  }
+
+  private parseChapterNumber(raw: string | undefined): number {
+    if (!raw) return 1;
+
+    const numeric = Number.parseInt(raw, 10);
+    if (!Number.isNaN(numeric)) return numeric;
+
+    return this.parseChineseNumber(raw.replace(/^第|章$/g, ''));
+  }
+
+  private parseChineseNumber(raw: string): number {
+    const digitMap: Record<string, number> = {
+      零: 0,
+      一: 1,
+      二: 2,
+      两: 2,
+      三: 3,
+      四: 4,
+      五: 5,
+      六: 6,
+      七: 7,
+      八: 8,
+      九: 9,
+    };
+    const unitMap: Record<string, number> = {
+      十: 10,
+      百: 100,
+      千: 1000,
+      万: 10000,
+    };
+
+    let total = 0;
+    let section = 0;
+    let current = 0;
+
+    for (const char of raw) {
+      if (char in digitMap) {
+        current = digitMap[char];
+        continue;
+      }
+
+      const unit = unitMap[char];
+      if (!unit) continue;
+
+      if (unit === 10000) {
+        section = (section + (current || 0)) * unit;
+        total += section;
+        section = 0;
+        current = 0;
+        continue;
+      }
+
+      section += (current || 1) * unit;
+      current = 0;
+    }
+
+    return total + section + current;
+  }
+
+  private isDuplicateChapterNumberError(error: unknown): boolean {
+    if (!(error instanceof QueryFailedError)) return false;
+    const driverError = error.driverError as { code?: string } | undefined;
+    return driverError?.code === '23505';
   }
 }

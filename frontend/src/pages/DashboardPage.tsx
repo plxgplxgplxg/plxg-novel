@@ -1,9 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchBooks, startTranslation } from '../api';
+import { createBookProgressStreamUrl, fetchBooks, startTranslation } from '../api';
 import { Link } from 'react-router-dom';
 import { Play, RotateCw, BookOpen, AlertCircle, Plus } from 'lucide-react';
 import type { Book } from '../store'; // Just for types
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 const DashboardPage = () => {
   const queryClient = useQueryClient();
@@ -12,8 +12,38 @@ const DashboardPage = () => {
   const { data: books = [], isLoading } = useQuery({
     queryKey: ['books'],
     queryFn: fetchBooks,
-    refetchInterval: 3000, // Poll every 3 seconds
   });
+
+  useEffect(() => {
+    const activeBooks = books.filter((book) =>
+      book.chapters?.some((chapter) =>
+        ['pending', 'splitting', 'translating'].includes(chapter.status),
+      ),
+    );
+
+    if (activeBooks.length === 0) {
+      return;
+    }
+
+    const streams = activeBooks.map((book) => {
+      const stream = new EventSource(createBookProgressStreamUrl(book.id));
+
+      stream.onmessage = () => {
+        queryClient.invalidateQueries({ queryKey: ['books'] });
+        queryClient.invalidateQueries({ queryKey: ['book', book.id] });
+      };
+
+      stream.onerror = () => {
+        stream.close();
+      };
+
+      return stream;
+    });
+
+    return () => {
+      streams.forEach((stream) => stream.close());
+    };
+  }, [books, queryClient]);
 
   const translateMutation = useMutation({
     mutationFn: startTranslation,

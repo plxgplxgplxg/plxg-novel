@@ -82,9 +82,9 @@ const UploadPage = () => {
         createdBookId = book.id;
       }
 
-      await Promise.all(
-        filledSlots.map(slot => uploadMutation.mutateAsync({ bookId, file: slot.file! }))
-      );
+      for (const slot of filledSlots) {
+        await uploadMutation.mutateAsync({ bookId, file: slot.file! });
+      }
 
       queryClient.invalidateQueries({ queryKey: ['books'] });
       navigate('/');
