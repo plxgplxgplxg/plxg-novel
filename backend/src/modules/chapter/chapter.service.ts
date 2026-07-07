@@ -3,9 +3,10 @@ import {
   NotFoundException,
   ConflictException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { QueryFailedError, Repository } from 'typeorm';
+import { QueryFailedError, Repository, SelectQueryBuilder } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Chapter, ChapterStatus } from '../../database/entities/chapter.entity';
@@ -17,6 +18,7 @@ import {
   JobType,
 } from '../../database/entities/translation-job.entity';
 import { CreateChapterDto } from './dto/create-chapter.dto';
+import { ListBookChaptersDto } from './dto/list-book-chapters.dto';
 import {
   QUEUE_CHAPTER_SPLIT,
   BULLMQ_BACKOFF_CONFIG,
@@ -24,6 +26,20 @@ import {
 } from '../../queue/queue.constants';
 
 const CHAPTER_NUMBER_PATTERN = /^((第[一二三四五六七八九十百千万零两\d]+章)|Chapter\s+(\d+))/i;
+const DEFAULT_PAGE = 1;
+const DEFAULT_PAGE_SIZE = 8;
+const MAX_PAGE_SIZE = 20;
+
+interface UploadSourceMetadata {
+  sourceFileName: string;
+  sourceFileSize: number;
+}
+
+interface ParsedChapterBlock {
+  number: number;
+  title: string;
+  content: string;
+}
 
 @Injectable()
 export class ChapterService {
@@ -62,27 +78,17 @@ export class ChapterService {
     bookId: string,
     userId: string,
     fileContent: string,
+    sourceMetadata: UploadSourceMetadata,
+    chapterNumberStart?: string,
   ): Promise<{ chapters: Chapter[]; jobId: string }> {
     await this.assertBookOwnership(bookId, userId);
 
-    let chapterBlocks = this.extractChaptersFromText(fileContent);
-
-    if (chapterBlocks.length === 0) {
-      const lastChapter = await this.chapterRepo.findOne({
-        where: { bookId },
-        order: { chapterNumber: 'DESC' },
-      });
-
-      const nextChapterNumber = lastChapter ? lastChapter.chapterNumber + 1 : 1;
-
-      chapterBlocks = [
-        {
-          number: nextChapterNumber,
-          title: `Chapter ${nextChapterNumber}`,
-          content: fileContent.trim(),
-        },
-      ];
-    }
+    const nextChapterNumber = await this.getNextChapterNumber(bookId);
+    const chapterBlocks = this.buildUploadChapterBlocks(
+      fileContent,
+      chapterNumberStart,
+      nextChapterNumber,
+    );
 
     const chapters = chapterBlocks.map((block) =>
       this.chapterRepo.create({
@@ -90,6 +96,8 @@ export class ChapterService {
         chapterNumber: block.number,
         titleOriginal: block.title,
         rawContent: block.content,
+        sourceFileName: sourceMetadata.sourceFileName,
+        sourceFileSize: sourceMetadata.sourceFileSize,
       }),
     );
 
@@ -105,6 +113,53 @@ export class ChapterService {
       }
       throw error;
     }
+  }
+
+  async listBookChapters(
+    bookId: string,
+    userId: string,
+    query: ListBookChaptersDto,
+  ) {
+    await this.assertBookOwnership(bookId, userId);
+
+    const page = this.parsePositiveInt(query.page, DEFAULT_PAGE);
+    const pageSize = Math.min(
+      this.parsePositiveInt(query.page, DEFAULT_PAGE_SIZE),
+      MAX_PAGE_SIZE,
+    );
+    const offset = (page - 1) * pageSize;
+
+    const baseQuery = this.chapterRepo
+      .createQueryBuilder('chapter')
+      .innerJoin('chapter.book', 'book')
+      .where('chapter.bookId = :bookId', { bookId })
+      .andWhere('book.userId = :userId', { userId });
+
+    if (query.search?.trim()) {
+      baseQuery.andWhere(
+        '(chapter.titleOriginal ILIKE :search OR chapter.titleTranslated ILIKE :search)',
+        { search: `%${query.search.trim()}%` },
+      );
+    }
+
+    const totalItems = await baseQuery.getCount();
+
+    const items = await baseQuery
+      .clone()
+      .orderBy('chapter.chapterNumber', 'DESC')
+      .addOrderBy('chapter.createdAt', 'DESC')
+      .offset(offset)
+      .limit(pageSize)
+      .getMany();
+
+    return {
+      items: items.map((chapter) => this.toChapterSummary(chapter)),
+      page,
+      pageSize,
+      totalItems,
+      totalPages: Math.max(1, Math.ceil(totalItems / pageSize)),
+      nextChapterNumber: await this.getNextChapterNumber(bookId),
+    };
   }
 
   async findOne(id: string, userId: string) {
@@ -126,6 +181,8 @@ export class ChapterService {
       translatedContent: chapter.translatedContent,
       createdAt: chapter.createdAt,
       updatedAt: chapter.updatedAt,
+      sourceFileName: chapter.sourceFileName,
+      sourceFileSize: chapter.sourceFileSize,
     };
   }
 
@@ -144,6 +201,47 @@ export class ChapterService {
 
     const jobId = await this.enqueueChaptersForTranslation(chapter.bookId, [chapter]);
     return { jobId };
+  }
+
+  async replaceChapterSourceFile(
+    id: string,
+    userId: string,
+    fileContent: string,
+    sourceMetadata: UploadSourceMetadata,
+  ): Promise<{ chapter: ReturnType<ChapterService['toChapterSummary']>; jobId: string }> {
+    const chapter = await this.findChapterForOwner(id, userId);
+    const replacementBlock = this.buildReplacementBlock(fileContent, chapter);
+
+    await this.segmentRepo.delete({ chapterId: chapter.id });
+    await this.jobRepo.delete({ chapterId: chapter.id });
+    await this.chapterRepo.update(chapter.id, {
+      titleOriginal: replacementBlock.title,
+      rawContent: replacementBlock.content,
+      sourceFileName: sourceMetadata.sourceFileName,
+      sourceFileSize: sourceMetadata.sourceFileSize,
+      status: ChapterStatus.PENDING,
+      totalSegments: 0,
+      completedSegments: 0,
+      translatedContent: undefined,
+      titleTranslated: undefined,
+    });
+
+    const refreshedChapter = await this.chapterRepo.findOne({
+      where: { id: chapter.id },
+    });
+
+    if (!refreshedChapter) {
+      throw new NotFoundException('Chapter not found');
+    }
+
+    const jobId = await this.enqueueChaptersForTranslation(chapter.bookId, [
+      refreshedChapter,
+    ]);
+
+    return {
+      chapter: this.toChapterSummary(refreshedChapter),
+      jobId,
+    };
   }
 
   private async assertBookOwnership(
@@ -168,6 +266,62 @@ export class ChapterService {
     }
 
     return chapter;
+  }
+
+  private buildUploadChapterBlocks(
+    fileContent: string,
+    chapterNumberStart: string | undefined,
+    nextChapterNumber: number,
+  ): ParsedChapterBlock[] {
+    const parsedBlocks = this.extractChaptersFromText(fileContent);
+    const explicitStart = this.parseOptionalChapterNumber(chapterNumberStart);
+
+    if (parsedBlocks.length === 0) {
+      const chapterNumber = explicitStart ?? nextChapterNumber;
+      return [
+        {
+          number: chapterNumber,
+          title: `Chapter ${chapterNumber}`,
+          content: fileContent.trim(),
+        },
+      ];
+    }
+
+    if (explicitStart) {
+      return parsedBlocks.map((block, index) => ({
+        ...block,
+        number: explicitStart + index,
+      }));
+    }
+
+    return parsedBlocks;
+  }
+
+  private buildReplacementBlock(
+    fileContent: string,
+    chapter: Chapter,
+  ): ParsedChapterBlock {
+    const parsedBlocks = this.extractChaptersFromText(fileContent);
+
+    if (parsedBlocks.length > 1) {
+      throw new BadRequestException(
+        'Replacement file must contain exactly one chapter.',
+      );
+    }
+
+    if (parsedBlocks.length === 1) {
+      return {
+        number: chapter.chapterNumber,
+        title: parsedBlocks[0].title,
+        content: parsedBlocks[0].content,
+      };
+    }
+
+    return {
+      number: chapter.chapterNumber,
+      title: chapter.titleOriginal,
+      content: fileContent.trim(),
+    };
   }
 
   private async enqueueChaptersForTranslation(
@@ -219,7 +373,7 @@ export class ChapterService {
 
   private extractChaptersFromText(
     text: string,
-  ): Array<{ number: number; title: string; content: string }> {
+  ): ParsedChapterBlock[] {
     const lines = text.split('\n');
     const chapters: Array<{ number: number; title: string; content: string }> =
       [];
@@ -321,5 +475,55 @@ export class ChapterService {
     if (!(error instanceof QueryFailedError)) return false;
     const driverError = error.driverError as { code?: string } | undefined;
     return driverError?.code === '23505';
+  }
+
+  private parseOptionalChapterNumber(raw: string | undefined): number | null {
+    if (!raw?.trim()) {
+      return null;
+    }
+
+    const parsed = Number.parseInt(raw.trim(), 10);
+
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      throw new BadRequestException('chapterNumberStart must be a positive integer');
+    }
+
+    return parsed;
+  }
+
+  private async getNextChapterNumber(bookId: string): Promise<number> {
+    const row = await this.chapterRepo
+      .createQueryBuilder('chapter')
+      .select('COALESCE(MAX(chapter.chapterNumber), 0)', 'maxChapterNumber')
+      .where('chapter.bookId = :bookId', { bookId })
+      .getRawOne<{ maxChapterNumber: string }>();
+
+    return Number.parseInt(row?.maxChapterNumber ?? '0', 10) + 1;
+  }
+
+  private parsePositiveInt(
+    raw: number | string | undefined,
+    fallback: number,
+  ): number {
+    const parsed =
+      typeof raw === 'number' ? raw : Number.parseInt(raw ?? '', 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  }
+
+  private toChapterSummary(chapter: Chapter) {
+    return {
+      id: chapter.id,
+      bookId: chapter.bookId,
+      chapterNumber: chapter.chapterNumber,
+      titleOriginal: chapter.titleOriginal,
+      titleTranslated: chapter.titleTranslated,
+      status: chapter.status,
+      totalSegments: chapter.totalSegments,
+      completedSegments: chapter.completedSegments,
+      createdAt: chapter.createdAt,
+      updatedAt: chapter.updatedAt,
+      sourceFileName: chapter.sourceFileName,
+      sourceFileSize: chapter.sourceFileSize,
+    };
   }
 }

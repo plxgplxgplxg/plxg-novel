@@ -48,6 +48,12 @@ export class Chapter {
   @Column({ type: 'text', nullable: true })
   translatedContent: string;
 
+  @Column({ nullable: true })
+  sourceFileName: string;
+
+  @Column({ nullable: true })
+  sourceFileSize: number;
+
   @Column({ type: 'enum', enum: ChapterStatus, default: ChapterStatus.PENDING })
   status: ChapterStatus;
 

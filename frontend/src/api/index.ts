@@ -3,6 +3,8 @@ import type {
   BookDetail,
   BookSummary,
   ChapterDetail,
+  ChapterSummary,
+  PaginatedChaptersResponse,
   PaginatedBooksResponse,
 } from '../store';
 
@@ -74,10 +76,41 @@ export const createBook = async (title: string, originalTitle?: string): Promise
   return res.data;
 };
 
-export const uploadChapters = async (bookId: string, file: File) => {
+export const uploadChapters = async (
+  bookId: string,
+  file: File,
+  chapterNumberStart?: number,
+) => {
   const formData = new FormData();
   formData.append('file', file);
+  if (chapterNumberStart) {
+    formData.append('chapterNumberStart', String(chapterNumberStart));
+  }
   const res = await apiClient.post(`/books/${bookId}/chapters/upload`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return res.data;
+};
+
+export const fetchBookChaptersForUpload = async (
+  bookId: string,
+  params?: {
+    search?: string;
+    page?: number;
+    pageSize?: number;
+  },
+): Promise<PaginatedChaptersResponse> => {
+  const res = await apiClient.get(`/books/${bookId}/chapters`, { params });
+  return res.data;
+};
+
+export const replaceChapterFile = async (
+  chapterId: string,
+  file: File,
+): Promise<{ chapter: ChapterSummary; jobId: string }> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await apiClient.post(`/chapters/${chapterId}/replace-file`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
   return res.data;

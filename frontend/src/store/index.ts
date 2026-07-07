@@ -11,6 +11,8 @@ export interface ChapterSummary {
   completedSegments: number;
   createdAt?: string;
   updatedAt?: string;
+  sourceFileName?: string;
+  sourceFileSize?: number;
 }
 
 export interface ChapterDetail extends ChapterSummary {
@@ -41,6 +43,15 @@ export interface PaginatedBooksResponse {
   pageSize: number;
   totalItems: number;
   totalPages: number;
+}
+
+export interface PaginatedChaptersResponse {
+  items: ChapterSummary[];
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  nextChapterNumber: number;
 }
 
 interface AppState {

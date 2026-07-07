@@ -1,23 +1,44 @@
-import { useState, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createBook, uploadChapters, fetchBookOptions } from '../api';
-import { Upload, FileText, ChevronLeft, Plus, Trash2, BookOpen } from 'lucide-react';
-import type { BookSummary } from '../store';
+import {
+  createBook,
+  uploadChapters,
+  fetchBookOptions,
+  fetchBookChaptersForUpload,
+  replaceChapterFile,
+} from '../api';
+import {
+  Upload,
+  FileText,
+  ChevronLeft,
+  Plus,
+  Trash2,
+  BookOpen,
+  RefreshCcw,
+  Search,
+} from 'lucide-react';
+import type {
+  BookSummary,
+  ChapterSummary,
+  PaginatedChaptersResponse,
+} from '../store';
 
 type UploadMode = 'new' | 'existing';
 
 interface ChapterFileSlot {
   id: string;
   file: File | null;
-  label: string;
+  chapterNumber: number;
 }
 
-const createSlot = (index: number): ChapterFileSlot => ({
-  id: `slot-${Date.now()}-${index}`,
+const createSlot = (index: number, chapterNumber: number): ChapterFileSlot => ({
+  id: `slot-${Date.now()}-${index}-${chapterNumber}`,
   file: null,
-  label: `Chapter ${index + 1}`,
+  chapterNumber,
 });
+
+const UPLOAD_PAGE_SIZE = 6;
 
 const UploadPage = () => {
   const [searchParams] = useSearchParams();
@@ -27,8 +48,11 @@ const UploadPage = () => {
   const [title, setTitle] = useState('');
   const [originalTitle, setOriginalTitle] = useState('');
   const [selectedBookId, setSelectedBookId] = useState(preselectedBookId);
-  const [slots, setSlots] = useState<ChapterFileSlot[]>([createSlot(0)]);
+  const [slots, setSlots] = useState<ChapterFileSlot[]>([createSlot(0, 1)]);
   const [error, setError] = useState('');
+  const [chapterSearch, setChapterSearch] = useState('');
+  const [chapterPage, setChapterPage] = useState(1);
+  const [replacementFiles, setReplacementFiles] = useState<Record<string, File | null>>({});
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -43,23 +67,72 @@ const UploadPage = () => {
   });
 
   const uploadMutation = useMutation({
-    mutationFn: ({ bookId, file }: { bookId: string; file: File }) =>
-      uploadChapters(bookId, file),
+    mutationFn: ({
+      bookId,
+      file,
+      chapterNumberStart,
+    }: {
+      bookId: string;
+      file: File;
+      chapterNumberStart?: number;
+    }) => uploadChapters(bookId, file, chapterNumberStart),
   });
 
+  const replaceChapterMutation = useMutation({
+    mutationFn: ({ chapterId, file }: { chapterId: string; file: File }) =>
+      replaceChapterFile(chapterId, file),
+  });
+
+  const { data: chapterData } = useQuery<PaginatedChaptersResponse>({
+    queryKey: ['upload-chapters', selectedBookId, chapterSearch, chapterPage],
+    queryFn: () =>
+      fetchBookChaptersForUpload(selectedBookId, {
+        search: chapterSearch,
+        page: chapterPage,
+        pageSize: UPLOAD_PAGE_SIZE,
+      }),
+    enabled: mode === 'existing' && Boolean(selectedBookId),
+  });
+
+  const nextChapterNumber = chapterData?.nextChapterNumber ?? 1;
+
+  useEffect(() => {
+    if (mode === 'existing') {
+      setSlots([createSlot(0, nextChapterNumber)]);
+    }
+  }, [mode, nextChapterNumber, selectedBookId]);
+
   const addSlot = () => {
-    setSlots(prev => [...prev, createSlot(prev.length)]);
+    setSlots((previous) => [
+      ...previous,
+      createSlot(previous.length, previous[previous.length - 1].chapterNumber + 1),
+    ]);
   };
 
   const removeSlot = (id: string) => {
-    setSlots(prev => prev.filter(s => s.id !== id));
+    setSlots((previous) => previous.filter((slot) => slot.id !== id));
   };
 
   const setSlotFile = (id: string, file: File) => {
-    setSlots(prev => prev.map(s => s.id === id ? { ...s, file } : s));
+    setSlots((previous) =>
+      previous.map((slot) => (slot.id === id ? { ...slot, file } : slot)),
+    );
   };
 
-  const isPending = createBookMutation.isPending || uploadMutation.isPending;
+  const setSlotChapterNumber = (id: string, chapterNumber: number) => {
+    setSlots((previous) =>
+      previous.map((slot) =>
+        slot.id === id ? { ...slot, chapterNumber } : slot,
+      ),
+    );
+  };
+
+  const isPending =
+    createBookMutation.isPending ||
+    uploadMutation.isPending ||
+    replaceChapterMutation.isPending;
+
+  const hasExistingBookSelected = mode === 'existing' && Boolean(selectedBookId);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,27 +153,68 @@ const UploadPage = () => {
       }
 
       for (const slot of filledSlots) {
-        await uploadMutation.mutateAsync({ bookId, file: slot.file! });
+        await uploadMutation.mutateAsync({
+          bookId,
+          file: slot.file!,
+          chapterNumberStart: mode === 'existing' ? slot.chapterNumber : undefined,
+        });
       }
 
       queryClient.invalidateQueries({ queryKey: ['books'] });
+      queryClient.invalidateQueries({ queryKey: ['upload-chapters'] });
       navigate(`/books/${bookId}`);
     } catch (err: any) {
       setError(err?.response?.data?.message || 'Upload thất bại. Kiểm tra backend logs.');
     }
   };
 
+  const replaceSelectedChapterFile = async (chapter: ChapterSummary) => {
+    const file = replacementFiles[chapter.id];
+
+    if (!file) {
+      setError('Vui lòng chọn file mới trước khi upload lại.');
+      return;
+    }
+
+    setError('');
+
+    try {
+      await replaceChapterMutation.mutateAsync({ chapterId: chapter.id, file });
+      setReplacementFiles((previous) => ({ ...previous, [chapter.id]: null }));
+      queryClient.invalidateQueries({ queryKey: ['books'] });
+      queryClient.invalidateQueries({ queryKey: ['book', selectedBookId] });
+      queryClient.invalidateQueries({ queryKey: ['upload-chapters', selectedBookId] });
+    } catch (err: any) {
+      setError(err?.response?.data?.message || 'Upload lại chương thất bại.');
+    }
+  };
+
+  const chapterItems = chapterData?.items ?? [];
+  const chapterListSummary = useMemo(() => {
+    if (!chapterData) {
+      return '';
+    }
+
+    const startItem = (chapterData.page - 1) * chapterData.pageSize + 1;
+    const endItem = Math.min(
+      chapterData.totalItems,
+      chapterData.page * chapterData.pageSize,
+    );
+
+    return `${startItem}-${endItem} / ${chapterData.totalItems} chương`;
+  }, [chapterData]);
+
   return (
-    <div style={{ maxWidth: '860px', margin: '0 auto' }}>
-      <div style={{ marginBottom: '1.5rem' }}>
+    <div className="upload-page">
+      <div className="upload-back-link">
         <Link to="/" style={{ color: 'var(--primary)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.875rem' }}>
           <ChevronLeft size={16} /> Dashboard
         </Link>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '2rem' }}>
-        <div style={{ backgroundColor: 'rgba(99, 102, 241, 0.2)', padding: '1rem', borderRadius: '50%' }}>
-          <Upload size={24} color="var(--primary)" />
+      <div className="upload-hero">
+        <div className="upload-hero-mark">
+          <Upload size={24} color="var(--color-brand)" />
         </div>
         <div>
           <h2 style={{ marginBottom: '0.25rem' }}>Upload Chương Truyện</h2>
@@ -108,26 +222,24 @@ const UploadPage = () => {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2rem', background: 'var(--bg-secondary)', borderRadius: '10px', padding: '4px' }}>
+      <div className="upload-mode-switch">
         <button
           type="button"
-          onClick={() => setMode('new')}
-          style={{
-            flex: 1, padding: '0.625rem 1rem', borderRadius: '8px', border: 'none', cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500, transition: 'all 0.2s',
-            background: mode === 'new' ? 'var(--primary)' : 'transparent',
-            color: mode === 'new' ? '#fff' : 'var(--text-muted)',
+          onClick={() => {
+            setMode('new');
+            setError('');
           }}
+          className={mode === 'new' ? 'upload-mode-button active' : 'upload-mode-button'}
         >
           Truyện mới
         </button>
         <button
           type="button"
-          onClick={() => setMode('existing')}
-          style={{
-            flex: 1, padding: '0.625rem 1rem', borderRadius: '8px', border: 'none', cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500, transition: 'all 0.2s',
-            background: mode === 'existing' ? 'var(--primary)' : 'transparent',
-            color: mode === 'existing' ? '#fff' : 'var(--text-muted)',
+          onClick={() => {
+            setMode('existing');
+            setError('');
           }}
+          className={mode === 'existing' ? 'upload-mode-button active' : 'upload-mode-button'}
         >
           Thêm vào truyện cũ
         </button>
@@ -168,7 +280,13 @@ const UploadPage = () => {
                 <select
                   className="input"
                   value={selectedBookId}
-                  onChange={e => setSelectedBookId(e.target.value)}
+                  onChange={e => {
+                    setSelectedBookId(e.target.value);
+                    setChapterPage(1);
+                    setChapterSearch('');
+                    setReplacementFiles({});
+                    setError('');
+                  }}
                   required
                   style={{ cursor: 'pointer' }}
                 >
@@ -183,7 +301,7 @@ const UploadPage = () => {
         </div>
 
         <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+          <div className="upload-card-header">
             <div>
               <h3 style={{ marginBottom: '0.25rem', fontSize: '1rem' }}>Danh sách chương</h3>
               <p style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
@@ -200,18 +318,97 @@ const UploadPage = () => {
             </button>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          {hasExistingBookSelected ? (
+            <div className="upload-next-number-hint">
+              Số chương kế tiếp được đề xuất từ chương mới nhất hiện có: <strong>{nextChapterNumber}</strong>
+            </div>
+          ) : null}
+
+          <div className="upload-slot-list">
             {slots.map((slot, idx) => (
               <FileSlotRow
                 key={slot.id}
                 slot={slot}
                 index={idx}
+                showChapterNumber={mode === 'existing'}
                 onFileChange={setSlotFile}
+                onChapterNumberChange={setSlotChapterNumber}
                 onRemove={slots.length > 1 ? () => removeSlot(slot.id) : undefined}
               />
             ))}
           </div>
         </div>
+
+        {hasExistingBookSelected ? (
+          <div className="card upload-existing-chapters-card">
+            <div className="upload-card-header">
+              <div>
+                <h3 style={{ marginBottom: '0.25rem', fontSize: '1rem' }}>Các chương hiện có</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
+                  Sắp xếp theo chương mới nhất. Chọn file mới để upload lại, backend sẽ xóa segment cũ của chapter đó và dịch lại từ đầu.
+                </p>
+              </div>
+
+              <div className="upload-search-box">
+                <Search size={16} color="var(--color-text-tertiary)" />
+                <input
+                  className="input"
+                  value={chapterSearch}
+                  onChange={(event) => {
+                    setChapterSearch(event.target.value);
+                    setChapterPage(1);
+                  }}
+                  placeholder="Tìm theo tiêu đề chương..."
+                  style={{ marginBottom: 0 }}
+                />
+              </div>
+            </div>
+
+            {chapterItems.length === 0 ? (
+              <div className="upload-empty-state">Chưa có chương nào trong truyện này.</div>
+            ) : (
+              <div className="existing-chapter-list">
+                {chapterItems.map((chapter) => (
+                  <ExistingChapterRow
+                    key={chapter.id}
+                    chapter={chapter}
+                    replacementFile={replacementFiles[chapter.id] ?? null}
+                    isPending={replaceChapterMutation.isPending}
+                    onReplacementFileChange={(file) =>
+                      setReplacementFiles((previous) => ({
+                        ...previous,
+                        [chapter.id]: file,
+                      }))
+                    }
+                    onReplace={() => replaceSelectedChapterFile(chapter)}
+                  />
+                ))}
+              </div>
+            )}
+
+            <div className="upload-pagination">
+              <span>{chapterListSummary}</span>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={(chapterData?.page ?? 1) <= 1}
+                  onClick={() => setChapterPage((current) => current - 1)}
+                >
+                  Trang trước
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={(chapterData?.page ?? 1) >= (chapterData?.totalPages ?? 1)}
+                  onClick={() => setChapterPage((current) => current + 1)}
+                >
+                  Trang sau
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {error && (
           <div style={{ marginTop: '1rem', padding: '0.875rem 1rem', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px', color: '#f87171', fontSize: '0.875rem' }}>
@@ -233,31 +430,45 @@ const UploadPage = () => {
 interface FileSlotRowProps {
   slot: ChapterFileSlot;
   index: number;
+  showChapterNumber: boolean;
   onFileChange: (id: string, file: File) => void;
+  onChapterNumberChange: (id: string, chapterNumber: number) => void;
   onRemove?: () => void;
 }
 
-const FileSlotRow = ({ slot, index, onFileChange, onRemove }: FileSlotRowProps) => {
+const FileSlotRow = ({
+  slot,
+  index,
+  showChapterNumber,
+  onFileChange,
+  onChapterNumberChange,
+  onRemove,
+}: FileSlotRowProps) => {
   const ref = useRef<HTMLInputElement>(null);
 
   return (
-    <div
-      style={{
-        display: 'flex', alignItems: 'center', gap: '1rem',
-        padding: '0.875rem 1rem',
-        background: 'rgba(15, 23, 42, 0.4)',
-        border: `1px solid ${slot.file ? 'rgba(99, 102, 241, 0.5)' : 'var(--border-color)'}`,
-        borderRadius: '8px',
-        transition: 'border-color 0.2s',
-      }}
-    >
-      <div style={{
-        minWidth: '32px', height: '32px', borderRadius: '50%', background: 'rgba(99, 102, 241, 0.15)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: '0.75rem', fontWeight: 600, color: 'var(--primary)',
-      }}>
+    <div className={slot.file ? 'upload-slot-row has-file' : 'upload-slot-row'}>
+      <div className="upload-slot-index">
         {index + 1}
       </div>
+
+      {showChapterNumber ? (
+        <div className="upload-slot-number">
+          <label>Số chương</label>
+          <input
+            className="input"
+            type="number"
+            min={1}
+            value={slot.chapterNumber}
+            onChange={(event) =>
+              onChapterNumberChange(
+                slot.id,
+                Math.max(1, Number.parseInt(event.target.value || '1', 10)),
+              )
+            }
+          />
+        </div>
+      ) : null}
 
       <div style={{ flex: 1, minWidth: 0 }}>
         {slot.file ? (
@@ -303,6 +514,108 @@ const FileSlotRow = ({ slot, index, onFileChange, onRemove }: FileSlotRowProps) 
           <Trash2 size={16} />
         </button>
       )}
+    </div>
+  );
+};
+
+interface ExistingChapterRowProps {
+  chapter: ChapterSummary;
+  replacementFile: File | null;
+  isPending: boolean;
+  onReplacementFileChange: (file: File | null) => void;
+  onReplace: () => void;
+}
+
+const ExistingChapterRow = ({
+  chapter,
+  replacementFile,
+  isPending,
+  onReplacementFileChange,
+  onReplace,
+}: ExistingChapterRowProps) => {
+  const ref = useRef<HTMLInputElement>(null);
+  const progress =
+    chapter.totalSegments === 0
+      ? 0
+      : Math.round((chapter.completedSegments / chapter.totalSegments) * 100);
+
+  return (
+    <div className="existing-chapter-row">
+      <div className="existing-chapter-main">
+        <div className="existing-chapter-topline">
+          <div>
+            <strong>Chương {chapter.chapterNumber}</strong>
+            <div className="existing-chapter-title">
+              {chapter.titleTranslated || chapter.titleOriginal}
+            </div>
+          </div>
+          <span className={`badge badge-${chapter.status}`}>{chapter.status}</span>
+        </div>
+
+        <div className="existing-chapter-meta">
+          <span>{chapter.sourceFileName || 'Chưa có tên file đã lưu'}</span>
+          <span>
+            {chapter.sourceFileSize
+              ? `${(chapter.sourceFileSize / 1024).toFixed(1)} KB`
+              : 'Không rõ dung lượng'}
+          </span>
+          <span>
+            {chapter.completedSegments}/{chapter.totalSegments} segment
+          </span>
+        </div>
+
+        <div className="existing-chapter-progress">
+          <div className="progress-bar-container">
+            <div className="progress-bar" style={{ width: `${progress}%` }} />
+          </div>
+          <span>{progress}%</span>
+        </div>
+      </div>
+
+      <div className="existing-chapter-actions">
+        <input
+          ref={ref}
+          type="file"
+          accept=".txt,.docx"
+          style={{ display: 'none' }}
+          onChange={(event) => {
+            const nextFile = event.target.files?.[0] ?? null;
+            onReplacementFileChange(nextFile);
+          }}
+        />
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => ref.current?.click()}
+        >
+          <FileText size={16} />
+          <span>{replacementFile ? 'Đổi file mới' : 'Chọn file mới'}</span>
+        </button>
+        {replacementFile ? (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => onReplacementFileChange(null)}
+          >
+            <Trash2 size={16} />
+            <span>Bỏ file</span>
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="btn"
+          disabled={!replacementFile || isPending}
+          onClick={onReplace}
+        >
+          <RefreshCcw size={16} />
+          <span>{isPending ? 'Đang upload...' : 'Upload lại'}</span>
+        </button>
+        {replacementFile ? (
+          <div className="existing-chapter-replacement-file">
+            {replacementFile.name} ({(replacementFile.size / 1024).toFixed(1)} KB)
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 };
