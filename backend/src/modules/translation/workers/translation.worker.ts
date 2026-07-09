@@ -41,7 +41,12 @@ export interface TranslationJobPayload {
   chapterJobId?: string;
 }
 
-@Processor(QUEUE_TRANSLATION, { concurrency: TRANSLATION_WORKER_CONCURRENCY })
+@Processor(QUEUE_TRANSLATION, {
+  concurrency: TRANSLATION_WORKER_CONCURRENCY,
+  stalledInterval: 60000, // Tăng lên 60s
+  lockDuration: 60000, // Tăng thời gian lock
+  drainDelay: 30, // Chờ 30s khi không có job
+})
 export class TranslationWorker extends WorkerHost {
   private readonly logger = new Logger(TranslationWorker.name);
 
@@ -150,17 +155,20 @@ export class TranslationWorker extends WorkerHost {
 
     const allProcessed = chapter.completedSegments >= chapter.totalSegments;
     if (!allProcessed) {
-      await this.updateChapterJobProgress(chapter, chapterJobId);
-      await this.updateBookJobProgress(chapter.bookId, bookJobId);
-      this.eventEmitter.emit('chapter.progress', {
-        bookId: chapter.bookId,
-        chapterId,
-        completed: chapter.completedSegments,
-        total: chapter.totalSegments,
-        percent: Math.floor(
-          (chapter.completedSegments / chapter.totalSegments) * 100,
-        ),
-      });
+      // Chỉ update progress mỗi 10 segment để giảm tải DB
+      if (chapter.completedSegments % 10 === 0) {
+        await this.updateChapterJobProgress(chapter, chapterJobId);
+        await this.updateBookJobProgress(chapter.bookId, bookJobId);
+        this.eventEmitter.emit('chapter.progress', {
+          bookId: chapter.bookId,
+          chapterId,
+          completed: chapter.completedSegments,
+          total: chapter.totalSegments,
+          percent: Math.floor(
+            (chapter.completedSegments / chapter.totalSegments) * 100,
+          ),
+        });
+      }
       return;
     }
 

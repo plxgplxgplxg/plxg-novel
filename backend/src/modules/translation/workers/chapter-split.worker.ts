@@ -30,7 +30,12 @@ export interface ChapterSplitJobPayload {
   chapterJobId?: string;
 }
 
-@Processor(QUEUE_CHAPTER_SPLIT, { concurrency: SPLIT_WORKER_CONCURRENCY })
+@Processor(QUEUE_CHAPTER_SPLIT, {
+  concurrency: SPLIT_WORKER_CONCURRENCY,
+  stalledInterval: 60000,
+  lockDuration: 60000,
+  drainDelay: 30,
+})
 export class ChapterSplitWorker extends WorkerHost {
   private readonly logger = new Logger(ChapterSplitWorker.name);
 

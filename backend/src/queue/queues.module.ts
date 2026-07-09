@@ -18,8 +18,20 @@ import { QUEUE_CHAPTER_SPLIT, QUEUE_TRANSLATION } from './queue.constants';
       }),
     }),
     BullModule.registerQueue(
-      { name: QUEUE_CHAPTER_SPLIT },
-      { name: QUEUE_TRANSLATION },
+      {
+        name: QUEUE_CHAPTER_SPLIT,
+        defaultJobOptions: {
+          removeOnComplete: { count: 100 },
+          removeOnFail: { count: 200 },
+        },
+      },
+      {
+        name: QUEUE_TRANSLATION,
+        defaultJobOptions: {
+          removeOnComplete: { count: 100 },
+          removeOnFail: { count: 200 },
+        },
+      },
     ),
   ],
   exports: [BullModule],
