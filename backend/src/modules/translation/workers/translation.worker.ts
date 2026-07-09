@@ -35,7 +35,6 @@ import {
 } from '../../chapter/chapter-readability';
 
 export interface TranslationJobPayload {
-  segmentId: string;
   chapterId: string;
   bookJobId?: string;
   chapterJobId?: string;
@@ -43,9 +42,9 @@ export interface TranslationJobPayload {
 
 @Processor(QUEUE_TRANSLATION, {
   concurrency: TRANSLATION_WORKER_CONCURRENCY,
-  stalledInterval: 60000, // Tăng lên 60s
-  lockDuration: 60000, // Tăng thời gian lock
-  drainDelay: 30, // Chờ 30s khi không có job
+  stalledInterval: 300000, // 5 phút để tránh idle load trên Redis
+  lockDuration: 300000, 
+  drainDelay: 30, 
 })
 export class TranslationWorker extends WorkerHost {
   private readonly logger = new Logger(TranslationWorker.name);
@@ -70,12 +69,34 @@ export class TranslationWorker extends WorkerHost {
   }
 
   async process(job: Job<TranslationJobPayload>): Promise<void> {
-    const { segmentId, chapterId, bookJobId, chapterJobId } = job.data;
+    const { chapterId, bookJobId, chapterJobId } = job.data;
 
-    const segment = await this.segmentRepo.findOne({
-      where: { id: segmentId },
+    const segments = await this.segmentRepo.find({
+      where: { chapterId },
+      order: { segmentIndex: 'ASC' },
     });
-    if (!segment) return;
+    
+    const pendingSegments = segments.filter(s => s.status !== SegmentStatus.DONE);
+
+    for (let i = 0; i < pendingSegments.length; i += TRANSLATION_WORKER_CONCURRENCY) {
+      const batch = pendingSegments.slice(i, i + TRANSLATION_WORKER_CONCURRENCY);
+      
+      await Promise.all(batch.map(seg => this.processSegment(seg, chapterId, chapterJobId, bookJobId)));
+    }
+    
+    const finalChapter = await this.chapterRepo.findOne({ where: { id: chapterId } });
+    if (finalChapter) {
+      await this.finalizeChapter(finalChapter, chapterJobId, bookJobId);
+    }
+  }
+
+  private async processSegment(
+    segment: Segment,
+    chapterId: string,
+    chapterJobId?: string,
+    bookJobId?: string,
+  ): Promise<void> {
+    const segmentId = segment.id;
 
     if (
       segment.sourceText === PARAGRAPH_MARKER ||
@@ -153,26 +174,20 @@ export class TranslationWorker extends WorkerHost {
     });
     if (!chapter) return;
 
-    const allProcessed = chapter.completedSegments >= chapter.totalSegments;
-    if (!allProcessed) {
-      // Chỉ update progress mỗi 10 segment để giảm tải DB
-      if (chapter.completedSegments % 10 === 0) {
-        await this.updateChapterJobProgress(chapter, chapterJobId);
-        await this.updateBookJobProgress(chapter.bookId, bookJobId);
-        this.eventEmitter.emit('chapter.progress', {
-          bookId: chapter.bookId,
-          chapterId,
-          completed: chapter.completedSegments,
-          total: chapter.totalSegments,
-          percent: Math.floor(
-            (chapter.completedSegments / chapter.totalSegments) * 100,
-          ),
-        });
-      }
-      return;
+    // Chỉ update progress mỗi 10 segment để giảm tải DB
+    if (chapter.completedSegments % 10 === 0) {
+      await this.updateChapterJobProgress(chapter, chapterJobId);
+      await this.updateBookJobProgress(chapter.bookId, bookJobId);
+      this.eventEmitter.emit('chapter.progress', {
+        bookId: chapter.bookId,
+        chapterId,
+        completed: chapter.completedSegments,
+        total: chapter.totalSegments,
+        percent: Math.floor(
+          (chapter.completedSegments / chapter.totalSegments) * 100,
+        ),
+      });
     }
-
-    await this.finalizeChapter(chapter, chapterJobId, bookJobId);
   }
 
   private async finalizeChapter(

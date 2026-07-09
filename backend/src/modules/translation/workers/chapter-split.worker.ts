@@ -32,8 +32,8 @@ export interface ChapterSplitJobPayload {
 
 @Processor(QUEUE_CHAPTER_SPLIT, {
   concurrency: SPLIT_WORKER_CONCURRENCY,
-  stalledInterval: 60000,
-  lockDuration: 60000,
+  stalledInterval: 300000,
+  lockDuration: 300000,
   drainDelay: 30,
 })
 export class ChapterSplitWorker extends WorkerHost {
@@ -96,21 +96,18 @@ export class ChapterSplitWorker extends WorkerHost {
 
     const savedSegments = await this.segmentRepo.save(segmentEntities);
 
-    const translationJobs = savedSegments.map((seg) => ({
-      name: 'translate-segment',
-      data: {
-        segmentId: seg.id,
+    await this.translationQueue.add(
+      'translate-chapter',
+      {
         chapterId,
         bookJobId,
         chapterJobId,
       },
-      opts: {
+      {
         attempts: MAX_RETRY_ATTEMPTS,
         backoff: BULLMQ_BACKOFF_CONFIG,
       },
-    }));
-
-    await this.translationQueue.addBulk(translationJobs);
+    );
 
     this.logger.log(
       `Chapter ${chapterId} split into ${rawSegments.length} segments`,
