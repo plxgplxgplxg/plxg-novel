@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import {
   QUEUE_CHAPTER_MERGE,
+  QUEUE_CHAPTER_RAW_CACHE,
   QUEUE_CHAPTER_SPLIT,
   QUEUE_TRANSLATION,
 } from './queue.constants';
@@ -40,6 +41,13 @@ import {
       },
       {
         name: QUEUE_CHAPTER_MERGE,
+        defaultJobOptions: {
+          removeOnComplete: true,
+          removeOnFail: true,
+        },
+      },
+      {
+        name: QUEUE_CHAPTER_RAW_CACHE,
         defaultJobOptions: {
           removeOnComplete: true,
           removeOnFail: true,

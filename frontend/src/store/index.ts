@@ -25,6 +25,7 @@ export interface FailedSegmentDiagnostic {
 
 export interface ChapterDetail extends ChapterSummary {
   translatedContent?: string;
+  rawContent?: string;
   failedSegmentCount?: number;
   readableSegmentCount?: number;
   hasReadableContent?: boolean;

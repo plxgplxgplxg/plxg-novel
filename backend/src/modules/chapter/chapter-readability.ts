@@ -49,6 +49,20 @@ export const buildReadableChapterContent = (segments: SegmentLike[]) => {
   };
 };
 
+export const buildRawChapterContent = (segments: SegmentLike[]) => {
+  const content = segments
+    .map((segment) => {
+      if (isParagraphMarker(segment.sourceText)) {
+        return '\n\n';
+      }
+
+      return segment.sourceText;
+    })
+    .join('');
+
+  return segments.length > 0 ? content : undefined;
+};
+
 export const getFailedSegmentDiagnostics = (
   segments: SegmentLike[],
 ): FailedSegmentDiagnostic[] =>

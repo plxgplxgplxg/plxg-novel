@@ -28,11 +28,13 @@ import { CreateChapterDto } from './dto/create-chapter.dto';
 import { ListBookChaptersDto } from './dto/list-book-chapters.dto';
 import {
   QUEUE_CHAPTER_MERGE,
+  QUEUE_CHAPTER_RAW_CACHE,
   QUEUE_CHAPTER_SPLIT,
   BULLMQ_BACKOFF_CONFIG,
   MAX_RETRY_ATTEMPTS,
 } from '../../queue/queue.constants';
 import {
+  buildRawChapterContent,
   buildReadableChapterContent,
   getFailedSegmentDiagnostics,
 } from './chapter-readability';
@@ -59,6 +61,7 @@ interface ChapterReadRow {
   chapterNumber: number;
   titleOriginal: string;
   titleTranslated: string | null;
+  rawContent: string | null;
   status: ChapterStatus;
   totalSegments: number;
   completedSegments: number;
@@ -95,6 +98,7 @@ export interface ChapterReadResponse {
   totalSegments: number;
   completedSegments: number;
   translatedContent: string;
+  rawContent: string;
   failedSegmentCount: number;
   readableSegmentCount: number;
   hasReadableContent: boolean;
@@ -127,6 +131,8 @@ export class ChapterService {
     private readonly splitQueue: Queue,
     @InjectQueue(QUEUE_CHAPTER_MERGE)
     private readonly mergeQueue: Queue,
+    @InjectQueue(QUEUE_CHAPTER_RAW_CACHE)
+    private readonly rawCacheQueue: Queue,
     private readonly redisCacheService: RedisCacheService,
     private readonly novelCacheService: NovelCacheService,
   ) {}
@@ -264,6 +270,7 @@ export class ChapterService {
         'chapter.chapterNumber AS "chapterNumber"',
         'chapter.titleOriginal AS "titleOriginal"',
         'chapter.titleTranslated AS "titleTranslated"',
+        'chapter.rawContent AS "rawContent"',
         'chapter.status AS "status"',
         'chapter.totalSegments AS "totalSegments"',
         'chapter.completedSegments AS "completedSegments"',
@@ -308,11 +315,28 @@ export class ChapterService {
       return cached;
     }
 
+    const hasStoredRawContent = Boolean(chapter.rawContent?.trim());
+    let segments: Segment[] | null = null;
+    let rawContent = chapter.rawContent ?? '';
+
+    if (!hasStoredRawContent) {
+      segments = await this.segmentRepo.find({
+        where: { chapterId: chapter.id },
+        order: { segmentIndex: 'ASC' },
+      });
+      rawContent = buildRawChapterContent(segments) ?? '';
+
+      if (rawContent.trim()) {
+        await this.enqueueRawCacheJob(chapter.id);
+      }
+    }
+
     if (chapter.mergedAt && chapter.mergedContent !== null) {
       const mergedResponse = this.buildChapterReadResponse(
         chapter,
         canManage,
         chapter.mergedContent,
+        rawContent,
         chapter.mergedMetadata?.failedSegmentCount ?? 0,
         chapter.mergedMetadata?.readableSegmentCount ?? 0,
         chapter.mergedMetadata?.failedSegments ?? [],
@@ -328,13 +352,15 @@ export class ChapterService {
       return mergedResponse;
     }
 
-    const segments = await this.segmentRepo.find({
-      where: { chapterId: chapter.id },
-      order: { segmentIndex: 'ASC' },
-    });
-    const failedSegments = getFailedSegmentDiagnostics(segments);
+    const readableSegments =
+      segments ??
+      (await this.segmentRepo.find({
+        where: { chapterId: chapter.id },
+        order: { segmentIndex: 'ASC' },
+      }));
+    const failedSegments = getFailedSegmentDiagnostics(readableSegments);
     const { content: translatedContent, readableSegmentCount } =
-      buildReadableChapterContent(segments);
+      buildReadableChapterContent(readableSegments);
 
     await this.enqueueMergeJob(chapter.id);
 
@@ -342,6 +368,7 @@ export class ChapterService {
       chapter,
       canManage,
       translatedContent ?? chapter.translatedContent ?? '',
+      rawContent,
       failedSegments.length,
       readableSegmentCount,
       failedSegments,
@@ -460,6 +487,7 @@ export class ChapterService {
     chapter: ChapterReadRow,
     canManage: boolean,
     translatedContent: string,
+    rawContent: string,
     failedSegmentCount: number,
     readableSegmentCount: number,
     failedSegments: Array<{
@@ -478,6 +506,7 @@ export class ChapterService {
       totalSegments: Number(chapter.totalSegments),
       completedSegments: Number(chapter.completedSegments),
       translatedContent,
+      rawContent,
       failedSegmentCount,
       readableSegmentCount,
       hasReadableContent:
@@ -514,6 +543,32 @@ export class ChapterService {
     } catch (error) {
       this.logger.warn(
         `Failed to enqueue merge job for chapter ${chapterId}: ${String(error)}`,
+      );
+    }
+  }
+
+  private async enqueueRawCacheJob(chapterId: string): Promise<void> {
+    const jobId = `raw-cache:${chapterId}`;
+
+    try {
+      const existingJob = await this.rawCacheQueue.getJob(jobId);
+      if (existingJob) {
+        return;
+      }
+
+      await this.rawCacheQueue.add(
+        'cache-chapter-raw-content',
+        { chapterId },
+        {
+          jobId,
+          attempts: 1,
+          removeOnComplete: true,
+          removeOnFail: true,
+        },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to enqueue raw cache job for chapter ${chapterId}: ${String(error)}`,
       );
     }
   }

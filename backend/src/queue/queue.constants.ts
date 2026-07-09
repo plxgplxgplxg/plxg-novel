@@ -1,6 +1,7 @@
 export const QUEUE_CHAPTER_SPLIT = 'chapter-split-queue';
 export const QUEUE_TRANSLATION = 'translation-queue';
 export const QUEUE_CHAPTER_MERGE = 'chapter-merge-queue';
+export const QUEUE_CHAPTER_RAW_CACHE = 'chapter-raw-cache-queue';
 
 export const MAX_SEGMENT_LENGTH = 120;
 export const MAX_RETRY_ATTEMPTS = 5;

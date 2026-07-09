@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createBookProgressStreamUrl, fetchBookDetails, fetchChapter } from '../api';
@@ -17,6 +17,7 @@ const isChapterReadable = (chapter?: {
 const ReaderPage = () => {
   const { bookId, chapterId } = useParams<{ bookId: string; chapterId: string }>();
   const queryClient = useQueryClient();
+  const [viewMode, setViewMode] = useState<'translation' | 'raw'>('translation');
 
   const { data: book, isLoading: isBookLoading } = useQuery({
     queryKey: ['book', bookId],
@@ -58,6 +59,10 @@ const ReaderPage = () => {
       stream.close();
     };
   }, [book?.canManage, bookId, chapterId, queryClient]);
+
+  useEffect(() => {
+    setViewMode('translation');
+  }, [chapterId]);
 
   if (isBookLoading) {
     return (
@@ -125,6 +130,11 @@ const ReaderPage = () => {
     );
   }
 
+  const displayedContent =
+    viewMode === 'raw'
+      ? currentChapter.rawContent || 'Chưa có bản raw cho chương này.'
+      : currentChapter.translatedContent || 'Nội dung trống.';
+
   return (
     <div className="reader-container">
       <div className="reader-header">
@@ -146,7 +156,24 @@ const ReaderPage = () => {
           {currentChapter.titleTranslated || currentChapter.titleOriginal}
         </h2>
 
-        {currentChapter.failedSegmentCount ? (
+        <div className="reader-view-switch" role="tablist" aria-label="Chọn phiên bản chương">
+          <button
+            type="button"
+            className={viewMode === 'translation' ? 'reader-view-button active' : 'reader-view-button'}
+            onClick={() => setViewMode('translation')}
+          >
+            Bản dịch
+          </button>
+          <button
+            type="button"
+            className={viewMode === 'raw' ? 'reader-view-button active' : 'reader-view-button'}
+            onClick={() => setViewMode('raw')}
+          >
+            Bản raw
+          </button>
+        </div>
+
+        {viewMode === 'translation' && currentChapter.failedSegmentCount ? (
           <div className="reader-warning">
             <strong>
               {currentChapter.failedSegmentCount} segment lỗi đang được fallback về nguyên văn tiếng Trung.
@@ -158,10 +185,10 @@ const ReaderPage = () => {
         ) : null}
 
         <div className="reader-content reader-prose">
-          {currentChapter.translatedContent || 'Nội dung trống.'}
+          {displayedContent}
         </div>
 
-        {currentChapter.failedSegments?.length ? (
+        {viewMode === 'translation' && currentChapter.failedSegments?.length ? (
           <div className="reader-fallback-list">
             <h3>Segment fallback</h3>
             {currentChapter.failedSegments.map((segment) => (
