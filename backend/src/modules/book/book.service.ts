@@ -229,16 +229,6 @@ export class BookService {
 
   async findOneVisibleWithChapters(id: string, userId: string | null) {
     const startedAt = Date.now();
-    const scope = userId ? `user:${userId}` : 'public';
-    const cacheKey = this.novelCacheService.buildNovelDetailKey(id, scope);
-    const cached = await this.redisCacheService.get<BookDetailResponse>(cacheKey);
-    if (cached) {
-      this.logger.debug(
-        `findOneVisibleWithChapters cacheHit=true bookId=${id} queryCount=0 durationMs=${Date.now() - startedAt}`,
-      );
-      return cached;
-    }
-
     const book = await this.bookRepo.findOne({
       where: { id, deletedAt: IsNull() },
       select: {
@@ -256,6 +246,22 @@ export class BookService {
     }
 
     const canManage = userId === book.userId;
+    const shouldUseCache =
+      !canManage ||
+      [BookStatus.COMPLETED, BookStatus.FAILED].includes(book.status);
+    const scope = userId ? `user:${userId}` : 'public';
+    const cacheKey = this.novelCacheService.buildNovelDetailKey(id, scope);
+
+    if (shouldUseCache) {
+      const cached = await this.redisCacheService.get<BookDetailResponse>(cacheKey);
+      if (cached) {
+        this.logger.debug(
+          `findOneVisibleWithChapters cacheHit=true bookId=${id} queryCount=1 durationMs=${Date.now() - startedAt}`,
+        );
+        return cached;
+      }
+    }
+
     const chapterQuery = this.chapterRepo
       .createQueryBuilder('chapter')
       .select([
@@ -325,13 +331,15 @@ export class BookService {
       chapters,
     };
 
-    await this.redisCacheService.set(
-      cacheKey,
-      response,
-      NOVEL_DETAIL_TTL_SECONDS,
-    );
+    if (shouldUseCache) {
+      await this.redisCacheService.set(
+        cacheKey,
+        response,
+        NOVEL_DETAIL_TTL_SECONDS,
+      );
+    }
     this.logger.debug(
-      `findOneVisibleWithChapters cacheHit=false bookId=${id} queryCount=2 durationMs=${Date.now() - startedAt}`,
+      `findOneVisibleWithChapters cacheHit=false bookId=${id} queryCount=2 durationMs=${Date.now() - startedAt} cacheEnabled=${shouldUseCache}`,
     );
     return response;
   }

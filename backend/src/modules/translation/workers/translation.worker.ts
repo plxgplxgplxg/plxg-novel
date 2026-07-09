@@ -41,6 +41,8 @@ export interface TranslationJobPayload {
   chapterJobId?: string;
 }
 
+const PROGRESS_EVENT_INTERVAL = 5;
+
 @Processor(QUEUE_TRANSLATION, {
   concurrency: TRANSLATION_WORKER_CONCURRENCY,
   stalledInterval: 300000, 
@@ -178,10 +180,14 @@ export class TranslationWorker extends WorkerHost {
     });
     if (!chapter) return;
 
-    // Chỉ update progress mỗi 10 segment để giảm tải DB
-    if (chapter.completedSegments % 10 === 0) {
+    // Update theo batch nhỏ hơn để UI SSE bám sát tiến độ thực tế.
+    if (chapter.completedSegments % PROGRESS_EVENT_INTERVAL === 0) {
       await this.updateChapterJobProgress(chapter, chapterJobId);
       await this.updateBookJobProgress(chapter.bookId, bookJobId);
+      await this.novelCacheService.invalidateBookAndChapterCaches(
+        chapter.bookId,
+        chapterId,
+      );
       this.eventEmitter.emit('chapter.progress', {
         bookId: chapter.bookId,
         chapterId,
