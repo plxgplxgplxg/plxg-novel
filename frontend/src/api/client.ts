@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 export const API_URL =
-  import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
+  import.meta.env.VITE_API_URL ?? 'plxg-novel-backend-production.up.railway.app';
 export const TOKEN_STORAGE_KEY = 'plxg_novel_access_token';
 
 export const apiClient = axios.create({
