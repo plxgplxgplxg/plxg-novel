@@ -34,7 +34,7 @@ export interface ChapterSplitJobPayload {
   concurrency: SPLIT_WORKER_CONCURRENCY,
   stalledInterval: 300000,
   lockDuration: 300000,
-  drainDelay: 30,
+  drainDelay: 300,
 })
 export class ChapterSplitWorker extends WorkerHost {
   private readonly logger = new Logger(ChapterSplitWorker.name);

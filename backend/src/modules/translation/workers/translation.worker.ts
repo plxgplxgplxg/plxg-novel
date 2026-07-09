@@ -42,9 +42,9 @@ export interface TranslationJobPayload {
 
 @Processor(QUEUE_TRANSLATION, {
   concurrency: TRANSLATION_WORKER_CONCURRENCY,
-  stalledInterval: 300000, // 5 phút để tránh idle load trên Redis
+  stalledInterval: 300000, 
   lockDuration: 300000, 
-  drainDelay: 30, 
+  drainDelay: 300, 
 })
 export class TranslationWorker extends WorkerHost {
   private readonly logger = new Logger(TranslationWorker.name);
