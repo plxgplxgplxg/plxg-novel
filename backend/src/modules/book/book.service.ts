@@ -60,7 +60,7 @@ interface VisibleChapterRow {
   updatedAt: Date;
 }
 
-interface BookListResponse {
+export interface BookListResponse {
   items: Array<{
     id: string;
     title: string;
@@ -79,7 +79,7 @@ interface BookListResponse {
   totalPages: number;
 }
 
-interface BookDetailResponse {
+export interface BookDetailResponse {
   id: string;
   title: string;
   originalTitle: string | null;

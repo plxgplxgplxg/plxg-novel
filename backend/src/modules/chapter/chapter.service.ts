@@ -85,7 +85,7 @@ interface ChapterReadRow {
   bookOwnerId: string;
 }
 
-interface ChapterReadResponse {
+export interface ChapterReadResponse {
   id: string;
   bookId: string;
   chapterNumber: number;
