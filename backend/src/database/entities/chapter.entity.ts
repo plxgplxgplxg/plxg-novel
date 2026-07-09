@@ -59,7 +59,7 @@ export class Chapter {
   @Column({ default: 1 })
   mergeVersion: number;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   segmentsHash: string | null;
 
   @Column({ type: 'jsonb', nullable: true })
