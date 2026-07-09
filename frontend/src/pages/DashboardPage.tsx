@@ -31,6 +31,8 @@ const DashboardPage = () => {
   const { data, isLoading } = useQuery({
     queryKey: ['books', search, page],
     queryFn: () => fetchBooks({ search, page, pageSize: 9 }),
+    staleTime: 30_000,
+    gcTime: 120_000,
   });
   const books = data?.items ?? [];
   const activeBooks = (data?.items ?? []).filter((book) =>

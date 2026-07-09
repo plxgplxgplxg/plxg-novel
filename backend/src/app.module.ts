@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { CacheModule } from './cache/cache.module';
 import { User } from './database/entities/user.entity';
 import { Book } from './database/entities/book.entity';
 import { Chapter } from './database/entities/chapter.entity';
@@ -17,6 +18,7 @@ import { ProgressModule } from './modules/progress/progress.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    CacheModule,
     EventEmitterModule.forRoot(),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -29,6 +31,7 @@ import { ProgressModule } from './modules/progress/progress.module';
         password: config.get('DB_PASSWORD', 'postgres'),
         database: config.get('DB_DATABASE', 'novel_translation'),
         entities: [User, Book, Chapter, Segment, TranslationJob],
+        migrations: ['dist/database/migrations/*.js'],
         synchronize: config.get('NODE_ENV') !== 'production',
         logging: config.get('NODE_ENV') === 'development' ? 'all' : ['error'],
         ssl:

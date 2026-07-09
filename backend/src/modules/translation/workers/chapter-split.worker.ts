@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Inject, Logger } from '@nestjs/common';
+import { NovelCacheService } from '../../../cache/novel-cache.service';
 import {
   Chapter,
   ChapterStatus,
@@ -50,6 +51,7 @@ export class ChapterSplitWorker extends WorkerHost {
     private readonly chunker: { chunk: IChunker['chunk'] },
     @InjectQueue(QUEUE_TRANSLATION)
     private readonly translationQueue: Queue,
+    private readonly novelCacheService: NovelCacheService,
   ) {
     super();
   }
@@ -65,13 +67,27 @@ export class ChapterSplitWorker extends WorkerHost {
       return;
     }
 
-    await this.chapterRepo.update(chapterId, {
-      status: ChapterStatus.SPLITTING,
-      totalSegments: 0,
-      completedSegments: 0,
-      translatedContent: undefined,
-    });
+    await this.chapterRepo
+      .createQueryBuilder()
+      .update(Chapter)
+      .set({
+        status: ChapterStatus.SPLITTING,
+        totalSegments: 0,
+        completedSegments: 0,
+        translatedContent: undefined,
+        mergedContent: null,
+        mergedAt: null,
+        segmentsHash: null,
+        mergedMetadata: null,
+        mergeVersion: () => '"mergeVersion" + 1',
+      })
+      .where('id = :id', { id: chapterId })
+      .execute();
     await this.segmentRepo.delete({ chapterId });
+    await this.novelCacheService.invalidateBookAndChapterCaches(
+      chapter.bookId,
+      chapterId,
+    );
     if (chapterJobId) {
       await this.jobRepo.update(chapterJobId, {
         status: JobStatus.RUNNING,

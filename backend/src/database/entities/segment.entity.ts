@@ -6,6 +6,7 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
   Unique,
 } from 'typeorm';
 import { Chapter } from './chapter.entity';
@@ -23,6 +24,7 @@ export class Segment {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Index('IDX_segments_chapter_id')
   @Column({ name: 'chapter_id' })
   chapterId: string;
 

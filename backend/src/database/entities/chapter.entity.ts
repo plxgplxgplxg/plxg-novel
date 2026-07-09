@@ -7,6 +7,7 @@ import {
   ManyToOne,
   OneToMany,
   JoinColumn,
+  Index,
   Unique,
 } from 'typeorm';
 import { Book } from './book.entity';
@@ -26,6 +27,7 @@ export class Chapter {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Index('IDX_chapters_book_id')
   @Column({ name: 'book_id' })
   bookId: string;
 
@@ -47,6 +49,31 @@ export class Chapter {
 
   @Column({ type: 'text', nullable: true })
   translatedContent: string;
+
+  @Column({ type: 'text', nullable: true })
+  mergedContent: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  mergedAt: Date | null;
+
+  @Column({ default: 1 })
+  mergeVersion: number;
+
+  @Column({ nullable: true })
+  segmentsHash: string | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  mergedMetadata:
+    | {
+        failedSegmentCount: number;
+        readableSegmentCount: number;
+        failedSegments: Array<{
+          segmentIndex: number;
+          sourceText: string;
+          errorMessage: string | null;
+        }>;
+      }
+    | null;
 
   @Column({ nullable: true })
   sourceFileName: string;

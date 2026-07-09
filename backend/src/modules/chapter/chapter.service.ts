@@ -4,11 +4,18 @@ import {
   ConflictException,
   ForbiddenException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { QueryFailedError, Repository, SelectQueryBuilder } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import {
+  CHAPTER_READ_FALLBACK_TTL_SECONDS,
+  CHAPTER_READ_MERGED_TTL_SECONDS,
+} from '../../cache/cache.constants';
+import { NovelCacheService } from '../../cache/novel-cache.service';
+import { RedisCacheService } from '../../cache/redis-cache.service';
 import { Chapter, ChapterStatus } from '../../database/entities/chapter.entity';
 import { Segment } from '../../database/entities/segment.entity';
 import { Book, BookStatus } from '../../database/entities/book.entity';
@@ -20,6 +27,7 @@ import {
 import { CreateChapterDto } from './dto/create-chapter.dto';
 import { ListBookChaptersDto } from './dto/list-book-chapters.dto';
 import {
+  QUEUE_CHAPTER_MERGE,
   QUEUE_CHAPTER_SPLIT,
   BULLMQ_BACKOFF_CONFIG,
   MAX_RETRY_ATTEMPTS,
@@ -45,8 +53,67 @@ interface ParsedChapterBlock {
   content: string;
 }
 
+interface ChapterReadRow {
+  id: string;
+  bookId: string;
+  chapterNumber: number;
+  titleOriginal: string;
+  titleTranslated: string | null;
+  status: ChapterStatus;
+  totalSegments: number;
+  completedSegments: number;
+  translatedContent: string | null;
+  mergedContent: string | null;
+  mergedAt: Date | null;
+  mergeVersion: number;
+  segmentsHash: string | null;
+  mergedMetadata:
+    | {
+        failedSegmentCount: number;
+        readableSegmentCount: number;
+        failedSegments: Array<{
+          segmentIndex: number;
+          sourceText: string;
+          errorMessage: string | null;
+        }>;
+      }
+    | null;
+  sourceFileName: string | null;
+  sourceFileSize: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+  bookOwnerId: string;
+}
+
+interface ChapterReadResponse {
+  id: string;
+  bookId: string;
+  chapterNumber: number;
+  titleOriginal: string;
+  titleTranslated: string;
+  status: ChapterStatus;
+  totalSegments: number;
+  completedSegments: number;
+  translatedContent: string;
+  failedSegmentCount: number;
+  readableSegmentCount: number;
+  hasReadableContent: boolean;
+  failedSegments: Array<{
+    segmentIndex: number;
+    sourceText: string;
+    errorMessage: string | null;
+  }>;
+  createdAt: Date;
+  updatedAt: Date;
+  sourceFileName?: string;
+  sourceFileSize?: number;
+  canManage: boolean;
+}
+
 @Injectable()
 export class ChapterService {
+  private readonly logger = new Logger(ChapterService.name);
+
   constructor(
     @InjectRepository(Chapter)
     private readonly chapterRepo: Repository<Chapter>,
@@ -58,6 +125,10 @@ export class ChapterService {
     private readonly jobRepo: Repository<TranslationJob>,
     @InjectQueue(QUEUE_CHAPTER_SPLIT)
     private readonly splitQueue: Queue,
+    @InjectQueue(QUEUE_CHAPTER_MERGE)
+    private readonly mergeQueue: Queue,
+    private readonly redisCacheService: RedisCacheService,
+    private readonly novelCacheService: NovelCacheService,
   ) {}
 
   async addChapter(
@@ -75,7 +146,9 @@ export class ChapterService {
       rawContent: dto.rawContent,
     });
 
-    return this.chapterRepo.save(chapter);
+    const saved = await this.chapterRepo.save(chapter);
+    await this.novelCacheService.invalidateBookAndChapterCaches(bookId, saved.id);
+    return saved;
   }
 
   async uploadAndSplitChapters(
@@ -128,7 +201,7 @@ export class ChapterService {
 
     const page = this.parsePositiveInt(query.page, DEFAULT_PAGE);
     const pageSize = Math.min(
-      this.parsePositiveInt(query.page, DEFAULT_PAGE_SIZE),
+      this.parsePositiveInt(query.pageSize, DEFAULT_PAGE_SIZE),
       MAX_PAGE_SIZE,
     );
     const offset = (page - 1) * pageSize;
@@ -150,6 +223,20 @@ export class ChapterService {
 
     const items = await baseQuery
       .clone()
+      .select([
+        'chapter.id',
+        'chapter.bookId',
+        'chapter.chapterNumber',
+        'chapter.titleOriginal',
+        'chapter.titleTranslated',
+        'chapter.status',
+        'chapter.totalSegments',
+        'chapter.completedSegments',
+        'chapter.createdAt',
+        'chapter.updatedAt',
+        'chapter.sourceFileName',
+        'chapter.sourceFileSize',
+      ])
       .orderBy('chapter.chapterNumber', 'DESC')
       .addOrderBy('chapter.createdAt', 'DESC')
       .offset(offset)
@@ -167,16 +254,80 @@ export class ChapterService {
   }
 
   async findOne(id: string, userId: string | null) {
-    const chapter = await this.chapterRepo.findOne({
-      where: { id },
-      relations: { book: true },
-    });
+    const startedAt = Date.now();
+    const chapter = await this.chapterRepo
+      .createQueryBuilder('chapter')
+      .innerJoin('chapter.book', 'book')
+      .select([
+        'chapter.id AS "id"',
+        'chapter.bookId AS "bookId"',
+        'chapter.chapterNumber AS "chapterNumber"',
+        'chapter.titleOriginal AS "titleOriginal"',
+        'chapter.titleTranslated AS "titleTranslated"',
+        'chapter.status AS "status"',
+        'chapter.totalSegments AS "totalSegments"',
+        'chapter.completedSegments AS "completedSegments"',
+        'chapter.translatedContent AS "translatedContent"',
+        'chapter.mergedContent AS "mergedContent"',
+        'chapter.mergedAt AS "mergedAt"',
+        'chapter.mergeVersion AS "mergeVersion"',
+        'chapter.segmentsHash AS "segmentsHash"',
+        'chapter.mergedMetadata AS "mergedMetadata"',
+        'chapter.sourceFileName AS "sourceFileName"',
+        'chapter.sourceFileSize AS "sourceFileSize"',
+        'chapter.createdAt AS "createdAt"',
+        'chapter.updatedAt AS "updatedAt"',
+        'book.userId AS "bookOwnerId"',
+      ])
+      .where('chapter.id = :id', { id })
+      .getRawOne<ChapterReadRow>();
 
     if (!chapter) {
       throw new NotFoundException('Chapter not found');
     }
 
-    const canManage = userId === chapter.book.userId;
+    const canManage = userId === chapter.bookOwnerId;
+    const isProcessed =
+      Number(chapter.totalSegments) > 0 &&
+      Number(chapter.completedSegments) >= Number(chapter.totalSegments);
+    if (!canManage && !isProcessed) {
+      throw new ForbiddenException('Chapter is not ready to read');
+    }
+
+    const scope = canManage ? `user:${userId}` : 'public';
+    const cacheKey = this.novelCacheService.buildChapterReadKey(
+      chapter.id,
+      Number(chapter.mergeVersion),
+      scope,
+    );
+    const cached = await this.redisCacheService.get<ChapterReadResponse>(cacheKey);
+    if (cached) {
+      this.logger.debug(
+        `findOne chapterId=${id} cacheHit=true queryCount=1 durationMs=${Date.now() - startedAt}`,
+      );
+      return cached;
+    }
+
+    if (chapter.mergedAt && chapter.mergedContent !== null) {
+      const mergedResponse = this.buildChapterReadResponse(
+        chapter,
+        canManage,
+        chapter.mergedContent,
+        chapter.mergedMetadata?.failedSegmentCount ?? 0,
+        chapter.mergedMetadata?.readableSegmentCount ?? 0,
+        chapter.mergedMetadata?.failedSegments ?? [],
+      );
+      await this.redisCacheService.set(
+        cacheKey,
+        mergedResponse,
+        CHAPTER_READ_MERGED_TTL_SECONDS,
+      );
+      this.logger.debug(
+        `findOne chapterId=${id} cacheHit=false merged=true queryCount=1 durationMs=${Date.now() - startedAt}`,
+      );
+      return mergedResponse;
+    }
+
     const segments = await this.segmentRepo.find({
       where: { chapterId: chapter.id },
       order: { segmentIndex: 'ASC' },
@@ -184,35 +335,26 @@ export class ChapterService {
     const failedSegments = getFailedSegmentDiagnostics(segments);
     const { content: translatedContent, readableSegmentCount } =
       buildReadableChapterContent(segments);
-    const isProcessed =
-      chapter.totalSegments > 0 &&
-      chapter.completedSegments >= chapter.totalSegments;
-    const hasReadableContent = isProcessed;
 
-    if (!canManage && !isProcessed) {
-      throw new ForbiddenException('Chapter is not ready to read');
-    }
+    await this.enqueueMergeJob(chapter.id);
 
-    return {
-      id: chapter.id,
-      bookId: chapter.bookId,
-      chapterNumber: chapter.chapterNumber,
-      titleOriginal: chapter.titleOriginal,
-      titleTranslated: chapter.titleTranslated,
-      status: chapter.status,
-      totalSegments: chapter.totalSegments,
-      completedSegments: chapter.completedSegments,
-      translatedContent: translatedContent ?? chapter.translatedContent,
-      failedSegmentCount: failedSegments.length,
-      readableSegmentCount,
-      hasReadableContent,
-      failedSegments,
-      createdAt: chapter.createdAt,
-      updatedAt: chapter.updatedAt,
-      sourceFileName: chapter.sourceFileName,
-      sourceFileSize: chapter.sourceFileSize,
+    const fallbackResponse = this.buildChapterReadResponse(
+      chapter,
       canManage,
-    };
+      translatedContent ?? chapter.translatedContent ?? '',
+      failedSegments.length,
+      readableSegmentCount,
+      failedSegments,
+    );
+    await this.redisCacheService.set(
+      cacheKey,
+      fallbackResponse,
+      CHAPTER_READ_FALLBACK_TTL_SECONDS,
+    );
+    this.logger.debug(
+      `findOne chapterId=${id} cacheHit=false merged=false queryCount=2 durationMs=${Date.now() - startedAt}`,
+    );
+    return fallbackResponse;
   }
 
   async retranslateChapter(
@@ -221,12 +363,24 @@ export class ChapterService {
   ): Promise<{ jobId: string }> {
     const chapter = await this.findChapterForOwner(id, userId);
     await this.segmentRepo.delete({ chapterId: id });
-    await this.chapterRepo.update(id, {
-      status: ChapterStatus.PENDING,
-      totalSegments: 0,
-      completedSegments: 0,
-      translatedContent: '',
-    });
+    await this.chapterRepo
+      .createQueryBuilder()
+      .update(Chapter)
+      .set({
+        status: ChapterStatus.PENDING,
+        totalSegments: 0,
+        completedSegments: 0,
+        translatedContent: '',
+        mergedContent: null,
+        mergedAt: null,
+        segmentsHash: null,
+        mergedMetadata: null,
+        mergeVersion: () => '"mergeVersion" + 1',
+      })
+      .where('id = :id', { id })
+      .execute();
+
+    await this.novelCacheService.invalidateBookAndChapterCaches(chapter.bookId, id);
 
     const jobId = await this.enqueueChaptersForTranslation(chapter.bookId, [chapter]);
     return { jobId };
@@ -243,20 +397,49 @@ export class ChapterService {
 
     await this.segmentRepo.delete({ chapterId: chapter.id });
     await this.jobRepo.delete({ chapterId: chapter.id });
-    await this.chapterRepo.update(chapter.id, {
-      titleOriginal: replacementBlock.title,
-      rawContent: replacementBlock.content,
-      sourceFileName: sourceMetadata.sourceFileName,
-      sourceFileSize: sourceMetadata.sourceFileSize,
-      status: ChapterStatus.PENDING,
-      totalSegments: 0,
-      completedSegments: 0,
-      translatedContent: '',
-      titleTranslated: '',
-    });
+    await this.chapterRepo
+      .createQueryBuilder()
+      .update(Chapter)
+      .set({
+        titleOriginal: replacementBlock.title,
+        rawContent: replacementBlock.content,
+        sourceFileName: sourceMetadata.sourceFileName,
+        sourceFileSize: sourceMetadata.sourceFileSize,
+        status: ChapterStatus.PENDING,
+        totalSegments: 0,
+        completedSegments: 0,
+        translatedContent: '',
+        mergedContent: null,
+        mergedAt: null,
+        segmentsHash: null,
+        mergedMetadata: null,
+        titleTranslated: '',
+        mergeVersion: () => '"mergeVersion" + 1',
+      })
+      .where('id = :id', { id: chapter.id })
+      .execute();
+
+    await this.novelCacheService.invalidateBookAndChapterCaches(
+      chapter.bookId,
+      chapter.id,
+    );
 
     const refreshedChapter = await this.chapterRepo.findOne({
       where: { id: chapter.id },
+      select: {
+        id: true,
+        bookId: true,
+        chapterNumber: true,
+        titleOriginal: true,
+        titleTranslated: true,
+        status: true,
+        totalSegments: true,
+        completedSegments: true,
+        createdAt: true,
+        updatedAt: true,
+        sourceFileName: true,
+        sourceFileSize: true,
+      },
     });
 
     if (!refreshedChapter) {
@@ -271,6 +454,68 @@ export class ChapterService {
       chapter: this.toChapterSummary(refreshedChapter),
       jobId,
     };
+  }
+
+  private buildChapterReadResponse(
+    chapter: ChapterReadRow,
+    canManage: boolean,
+    translatedContent: string,
+    failedSegmentCount: number,
+    readableSegmentCount: number,
+    failedSegments: Array<{
+      segmentIndex: number;
+      sourceText: string;
+      errorMessage: string | null;
+    }>,
+  ): ChapterReadResponse {
+    return {
+      id: chapter.id,
+      bookId: chapter.bookId,
+      chapterNumber: Number(chapter.chapterNumber),
+      titleOriginal: chapter.titleOriginal,
+      titleTranslated: chapter.titleTranslated ?? '',
+      status: chapter.status,
+      totalSegments: Number(chapter.totalSegments),
+      completedSegments: Number(chapter.completedSegments),
+      translatedContent,
+      failedSegmentCount,
+      readableSegmentCount,
+      hasReadableContent:
+        Number(chapter.totalSegments) > 0 &&
+        Number(chapter.completedSegments) >= Number(chapter.totalSegments),
+      failedSegments,
+      createdAt: chapter.createdAt,
+      updatedAt: chapter.updatedAt,
+      sourceFileName: chapter.sourceFileName ?? undefined,
+      sourceFileSize: chapter.sourceFileSize ?? undefined,
+      canManage,
+    };
+  }
+
+  private async enqueueMergeJob(chapterId: string): Promise<void> {
+    const jobId = `merge:${chapterId}`;
+
+    try {
+      const existingJob = await this.mergeQueue.getJob(jobId);
+      if (existingJob) {
+        return;
+      }
+
+      await this.mergeQueue.add(
+        'merge-chapter-segments',
+        { chapterId },
+        {
+          jobId,
+          attempts: 1,
+          removeOnComplete: true,
+          removeOnFail: 50,
+        },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to enqueue merge job for chapter ${chapterId}: ${String(error)}`,
+      );
+    }
   }
 
   private async assertBookOwnership(
@@ -381,6 +626,7 @@ export class ChapterService {
     );
 
     await this.bookRepo.update(bookId, { status: BookStatus.PROCESSING });
+    await this.novelCacheService.invalidateBookAndChapterCaches(bookId);
 
     await this.splitQueue.addBulk(
       chapters.map((chapter) => ({
@@ -400,9 +646,7 @@ export class ChapterService {
     return bookJob.id;
   }
 
-  private extractChaptersFromText(
-    text: string,
-  ): ParsedChapterBlock[] {
+  private extractChaptersFromText(text: string): ParsedChapterBlock[] {
     const lines = text.split('\n');
     const chapters: Array<{ number: number; title: string; content: string }> =
       [];

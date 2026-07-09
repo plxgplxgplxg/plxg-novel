@@ -6,6 +6,7 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { Book } from './book.entity';
 import { Chapter } from './chapter.entity';
@@ -28,6 +29,7 @@ export class TranslationJob {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Index('IDX_translation_jobs_book_id')
   @Column({ name: 'book_id' })
   bookId: string;
 
@@ -35,6 +37,7 @@ export class TranslationJob {
   @JoinColumn({ name: 'book_id' })
   book: Book;
 
+  @Index('IDX_translation_jobs_chapter_id')
   @Column({ name: 'chapter_id', nullable: true })
   chapterId: string;
 

@@ -1,5 +1,6 @@
 export const QUEUE_CHAPTER_SPLIT = 'chapter-split-queue';
 export const QUEUE_TRANSLATION = 'translation-queue';
+export const QUEUE_CHAPTER_MERGE = 'chapter-merge-queue';
 
 export const MAX_SEGMENT_LENGTH = 120;
 export const MAX_RETRY_ATTEMPTS = 5;
@@ -17,3 +18,4 @@ export const BULLMQ_COLD_START_BACKOFF = {
 
 export const TRANSLATION_WORKER_CONCURRENCY = 2;
 export const SPLIT_WORKER_CONCURRENCY = 1;
+export const MERGE_WORKER_CONCURRENCY = 2;

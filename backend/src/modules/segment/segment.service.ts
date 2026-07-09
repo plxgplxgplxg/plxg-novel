@@ -3,8 +3,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { NovelCacheService } from '../../cache/novel-cache.service';
 import { Segment, SegmentStatus } from '../../database/entities/segment.entity';
-import { Chapter } from '../../database/entities/chapter.entity';
+import { Chapter, ChapterStatus } from '../../database/entities/chapter.entity';
 import {
   QUEUE_TRANSLATION,
   BULLMQ_BACKOFF_CONFIG,
@@ -20,6 +21,7 @@ export class SegmentService {
     private readonly chapterRepo: Repository<Chapter>,
     @InjectQueue(QUEUE_TRANSLATION)
     private readonly translationQueue: Queue,
+    private readonly novelCacheService: NovelCacheService,
   ) {}
 
   async retrySegment(id: string, userId: string): Promise<{ queued: boolean }> {
@@ -37,10 +39,28 @@ export class SegmentService {
       retryCount: 0,
       errorMessage: undefined,
     });
+    await this.chapterRepo
+      .createQueryBuilder()
+      .update(Chapter)
+      .set({
+        status: ChapterStatus.TRANSLATING,
+        mergedContent: null,
+        mergedAt: null,
+        segmentsHash: null,
+        mergedMetadata: null,
+        mergeVersion: () => '"mergeVersion" + 1',
+        completedSegments: () => 'GREATEST("completedSegments" - 1, 0)',
+      })
+      .where('id = :id', { id: segment.chapterId })
+      .execute();
+    await this.novelCacheService.invalidateBookAndChapterCaches(
+      segment.chapter.bookId,
+      segment.chapterId,
+    );
 
     await this.translationQueue.add(
-      'translate-segment',
-      { segmentId: id, chapterId: segment.chapterId },
+      'translate-chapter',
+      { chapterId: segment.chapterId },
       { attempts: MAX_RETRY_ATTEMPTS, backoff: BULLMQ_BACKOFF_CONFIG },
     );
 

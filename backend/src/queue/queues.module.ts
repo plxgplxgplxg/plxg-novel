@@ -1,7 +1,11 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { QUEUE_CHAPTER_SPLIT, QUEUE_TRANSLATION } from './queue.constants';
+import {
+  QUEUE_CHAPTER_MERGE,
+  QUEUE_CHAPTER_SPLIT,
+  QUEUE_TRANSLATION,
+} from './queue.constants';
 
 @Module({
   imports: [
@@ -29,6 +33,13 @@ import { QUEUE_CHAPTER_SPLIT, QUEUE_TRANSLATION } from './queue.constants';
       },
       {
         name: QUEUE_TRANSLATION,
+        defaultJobOptions: {
+          removeOnComplete: { count: 100 },
+          removeOnFail: { count: 200 },
+        },
+      },
+      {
+        name: QUEUE_CHAPTER_MERGE,
         defaultJobOptions: {
           removeOnComplete: { count: 100 },
           removeOnFail: { count: 200 },

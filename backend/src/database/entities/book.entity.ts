@@ -7,6 +7,7 @@ import {
   ManyToOne,
   OneToMany,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { User } from './user.entity';
 import { Chapter } from './chapter.entity';
@@ -25,6 +26,7 @@ export class Book {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Index('IDX_books_user_id')
   @Column({ name: 'user_id' })
   userId: string;
 

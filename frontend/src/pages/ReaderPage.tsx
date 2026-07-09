@@ -22,6 +22,8 @@ const ReaderPage = () => {
     queryKey: ['book', bookId],
     queryFn: () => fetchBookDetails(bookId!),
     enabled: !!bookId,
+    staleTime: 5 * 60_000,
+    gcTime: 15 * 60_000,
   });
 
   const currentChapterIdx = book?.chapters.findIndex((chapter) => chapter.id === chapterId) ?? -1;
@@ -34,6 +36,8 @@ const ReaderPage = () => {
     queryKey: ['chapter', chapterId],
     queryFn: () => fetchChapter(chapterId!),
     enabled: !!chapterId,
+    staleTime: 10 * 60_000,
+    gcTime: 30 * 60_000,
   });
 
   useEffect(() => {

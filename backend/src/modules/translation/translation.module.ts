@@ -8,6 +8,7 @@ import { TranslationJob } from '../../database/entities/translation-job.entity';
 import { HFInferenceProvider } from './providers/hf-inference.provider';
 import { ChineseTextChunker } from './chunker/chinese-text-chunker';
 import { ChapterSplitWorker } from './workers/chapter-split.worker';
+import { ChapterMergeWorker } from './workers/chapter-merge.worker';
 import { TranslationWorker } from './workers/translation.worker';
 import { TRANSLATION_PROVIDER } from './interfaces/translation-provider.interface';
 import { CHUNKER } from './interfaces/chunker.interface';
@@ -31,6 +32,7 @@ import { QueuesModule } from '../../queue/queues.module';
     HFInferenceProvider,
     ChineseTextChunker,
     ChapterSplitWorker,
+    ChapterMergeWorker,
     TranslationWorker,
   ],
   exports: [TRANSLATION_PROVIDER, CHUNKER],

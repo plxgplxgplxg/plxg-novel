@@ -37,6 +37,8 @@ const BookDetailPage = () => {
     queryKey: ['book', bookId],
     queryFn: () => fetchBookDetails(bookId!),
     enabled: !!bookId,
+    staleTime: 5 * 60_000,
+    gcTime: 15 * 60_000,
   });
 
   useEffect(() => {

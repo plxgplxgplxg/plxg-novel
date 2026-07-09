@@ -1,9 +1,10 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Job } from 'bullmq';
+import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
+import { Job, Queue } from 'bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { NovelCacheService } from '../../../cache/novel-cache.service';
 import {
   Chapter,
   ChapterStatus,
@@ -20,12 +21,12 @@ import {
 import type { ITranslationProvider } from '../interfaces/translation-provider.interface';
 import { TRANSLATION_PROVIDER } from '../interfaces/translation-provider.interface';
 import {
-  EmptyTranslationError,
   ProviderColdStartError,
   TranslationProviderError,
 } from '../interfaces/translation-errors';
 import {
   QUEUE_TRANSLATION,
+  QUEUE_CHAPTER_MERGE,
   TRANSLATION_WORKER_CONCURRENCY,
   MAX_FAILED_SEGMENT_PERCENT,
 } from '../../../queue/queue.constants';
@@ -62,8 +63,11 @@ export class TranslationWorker extends WorkerHost {
     private readonly translationProvider: {
       translate: ITranslationProvider['translate'];
     },
+    @InjectQueue(QUEUE_CHAPTER_MERGE)
+    private readonly mergeQueue: Queue,
     private readonly dataSource: DataSource,
     private readonly eventEmitter: EventEmitter2,
+    private readonly novelCacheService: NovelCacheService,
   ) {
     super();
   }
@@ -227,6 +231,11 @@ export class TranslationWorker extends WorkerHost {
       translatedContent: translatedContent ?? '',
       status: newStatus,
     });
+    await this.novelCacheService.invalidateBookAndChapterCaches(
+      chapter.bookId,
+      chapter.id,
+    );
+    await this.enqueueMergeJob(chapter.id);
     if (chapterJobId) {
       await this.jobRepo.update(chapterJobId, {
         status:
@@ -273,6 +282,7 @@ export class TranslationWorker extends WorkerHost {
     else newStatus = BookStatus.PROCESSING;
 
     await this.bookRepo.update(bookId, { status: newStatus });
+    await this.novelCacheService.invalidateBookAndChapterCaches(bookId);
     if (!bookJobId) return;
 
     const hasActiveChapters = chapters.some((chapter) =>
@@ -343,5 +353,31 @@ export class TranslationWorker extends WorkerHost {
     await this.jobRepo.update(bookJobId, {
       progressPercent,
     });
+  }
+
+  private async enqueueMergeJob(chapterId: string): Promise<void> {
+    const jobId = `merge:${chapterId}`;
+
+    try {
+      const existingJob = await this.mergeQueue.getJob(jobId);
+      if (existingJob) {
+        return;
+      }
+
+      await this.mergeQueue.add(
+        'merge-chapter-segments',
+        { chapterId },
+        {
+          jobId,
+          attempts: 1,
+          removeOnComplete: true,
+          removeOnFail: 50,
+        },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to enqueue merge job for chapter ${chapterId}: ${String(error)}`,
+      );
+    }
   }
 }
