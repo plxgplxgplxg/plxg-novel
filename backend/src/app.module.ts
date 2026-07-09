@@ -30,7 +30,7 @@ import { ProgressModule } from './modules/progress/progress.module';
         database: config.get('DB_DATABASE', 'novel_translation'),
         entities: [User, Book, Chapter, Segment, TranslationJob],
         synchronize: config.get('NODE_ENV') !== 'production',
-        logging: config.get('NODE_ENV') === 'development',
+        logging: config.get('NODE_ENV') === 'development' ? 'all' : ['error'],
         ssl:
           config.get('DB_SSL') === 'true' ||
           config.get('DB_HOST', '').includes('aivencloud.com')

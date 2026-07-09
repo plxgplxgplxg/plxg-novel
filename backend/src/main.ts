@@ -3,7 +3,15 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    logger: ['log', 'error', 'warn', 'debug', 'verbose'],
+  });
+
+  // Log incoming HTTP requests
+  app.use((req: any, res: any, next: any) => {
+    console.log(`[HTTP] ${req.method} ${req.url}`);
+    next();
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({
