@@ -29,7 +29,6 @@ export class HFInferenceProvider implements ITranslationProvider {
       return '';
     }
 
-    // Giới hạn độ dài để tránh request quá lớn (ví dụ: 512 ký tự)
     const limitedText = trimmedText.slice(0, 120);
 
     const token = this.configService.get<string>('HF_TOKEN');

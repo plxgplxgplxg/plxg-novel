@@ -43,8 +43,8 @@ interface VisibleBookRow {
 
 const READABLE_CHAPTER_PREDICATE = `
   (
-    visible_chapter.totalSegments > 0
-    AND visible_chapter.completedSegments >= visible_chapter.totalSegments
+    visible_chapter."totalSegments" > 0
+    AND visible_chapter."completedSegments" >= visible_chapter."totalSegments"
   )
 `;
 
@@ -88,10 +88,10 @@ export class BookService {
 
     if (userId) {
       baseQuery.andWhere(
-        `(book.userId = :userId OR EXISTS (
+        `(book.user_id = :userId OR EXISTS (
           SELECT 1
           FROM chapters visible_chapter
-          WHERE visible_chapter.bookId = book.id
+          WHERE visible_chapter.book_id = book.id
             AND ${READABLE_CHAPTER_PREDICATE}
         ))`,
         {
@@ -103,7 +103,7 @@ export class BookService {
         `EXISTS (
           SELECT 1
           FROM chapters visible_chapter
-          WHERE visible_chapter.bookId = book.id
+          WHERE visible_chapter.book_id = book.id
             AND ${READABLE_CHAPTER_PREDICATE}
         )`,
         {
@@ -130,11 +130,11 @@ export class BookService {
         'book.status AS "status"',
         'book.createdAt AS "createdAt"',
         'COUNT(chapter.id)::int AS "chapterCount"',
-        'COALESCE(SUM(chapter.totalSegments), 0)::int AS "totalSegments"',
-        'COALESCE(SUM(chapter.completedSegments), 0)::int AS "completedSegments"',
+        'COALESCE(SUM(chapter."totalSegments"), 0)::int AS "totalSegments"',
+        'COALESCE(SUM(chapter."completedSegments"), 0)::int AS "completedSegments"',
         `COALESCE(SUM(CASE WHEN chapter.status = 'done' THEN 1 ELSE 0 END), 0)::int AS "translatedChapterCount"`,
         userId
-          ? `CASE WHEN book.userId = :userId THEN TRUE ELSE FALSE END AS "canManage"`
+          ? `CASE WHEN book.user_id = :userId THEN TRUE ELSE FALSE END AS "canManage"`
           : 'FALSE AS "canManage"',
       ])
       .groupBy('book.id')
