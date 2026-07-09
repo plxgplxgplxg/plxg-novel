@@ -508,7 +508,7 @@ export class ChapterService {
           jobId,
           attempts: 1,
           removeOnComplete: true,
-          removeOnFail: 50,
+          removeOnFail: true,
         },
       );
     } catch (error) {

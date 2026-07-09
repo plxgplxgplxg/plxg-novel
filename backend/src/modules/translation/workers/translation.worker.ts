@@ -371,7 +371,7 @@ export class TranslationWorker extends WorkerHost {
           jobId,
           attempts: 1,
           removeOnComplete: true,
-          removeOnFail: 50,
+          removeOnFail: true,
         },
       );
     } catch (error) {

@@ -27,22 +27,22 @@ import {
       {
         name: QUEUE_CHAPTER_SPLIT,
         defaultJobOptions: {
-          removeOnComplete: { count: 100 },
-          removeOnFail: { count: 200 },
+          removeOnComplete: true,
+          removeOnFail: true,
         },
       },
       {
         name: QUEUE_TRANSLATION,
         defaultJobOptions: {
-          removeOnComplete: { count: 100 },
-          removeOnFail: { count: 200 },
+          removeOnComplete: true,
+          removeOnFail: true,
         },
       },
       {
         name: QUEUE_CHAPTER_MERGE,
         defaultJobOptions: {
-          removeOnComplete: { count: 100 },
-          removeOnFail: { count: 200 },
+          removeOnComplete: true,
+          removeOnFail: true,
         },
       },
     ),
