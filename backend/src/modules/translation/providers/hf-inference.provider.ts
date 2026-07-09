@@ -24,6 +24,14 @@ export class HFInferenceProvider implements ITranslationProvider {
     _sourceLang: string,
     _targetLang: string,
   ): Promise<string> {
+    const trimmedText = text.trim();
+    if (!trimmedText) {
+      return '';
+    }
+
+    // Giới hạn độ dài để tránh request quá lớn (ví dụ: 512 ký tự)
+    const limitedText = trimmedText.slice(0, 120);
+
     const token = this.configService.get<string>('HF_TOKEN');
     const res = await fetch(this.getEndpoint(), {
       method: 'POST',
@@ -32,7 +40,7 @@ export class HFInferenceProvider implements ITranslationProvider {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        inputs: text,
+        inputs: limitedText,
         parameters: { src_lang: 'zho_Hans', tgt_lang: 'vie_Latn' },
       }),
     });
