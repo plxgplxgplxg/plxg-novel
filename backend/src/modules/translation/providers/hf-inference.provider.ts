@@ -11,8 +11,12 @@ import {
   TranslationProviderError,
 } from '../interfaces/translation-errors';
 
-const DEFAULT_ENDPOINT = 'https://having-pharmaceuticals-chargers-transportation.trycloudflare.com/v1/chat/completions';
+const DEFAULT_ENDPOINT =
+  'https://having-pharmaceuticals-chargers-transportation.trycloudflare.com/v1/chat/completions';
 const DEFAULT_MODEL = 'configured-literary-translation-model';
+const DEFAULT_MAX_TOKENS = 4096;
+const DEFAULT_MAX_ATTEMPTS = 2;
+const CJK_CHARACTER_PATTERN = /[\u3400-\u9fff\uf900-\ufaff]/;
 
 @Injectable()
 export class HFInferenceProvider implements ITranslationProvider {
@@ -27,9 +31,42 @@ export class HFInferenceProvider implements ITranslationProvider {
   async translateChunk(
     input: TranslationChunkRequest,
   ): Promise<TranslationChunkResult> {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= DEFAULT_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        return await this.translateChunkAttempt(input, attempt, lastError);
+      } catch (error) {
+        lastError = error;
+        if (!this.shouldRetryProviderOutput(error, attempt)) {
+          throw error;
+        }
+
+        this.logger.warn(
+          `Retrying AI Provider request ${input.requestId || 'unknown'} after invalid output: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
+    throw lastError instanceof Error
+      ? lastError
+      : new TranslationProviderError(String(lastError));
+  }
+
+  private async translateChunkAttempt(
+    input: TranslationChunkRequest,
+    attempt: number,
+    previousError: unknown,
+  ): Promise<TranslationChunkResult> {
     const token = this.configService.get<string>('HF_TOKEN');
     const endpoint = this.getEndpoint();
-    this.logger.log(`Calling AI Provider at ${endpoint} for request ${input.requestId || 'unknown'}`);
+    this.logger.log(
+      `Calling AI Provider at ${endpoint} for request ${
+        input.requestId || 'unknown'
+      } attempt ${attempt}`,
+    );
 
     const res = await fetch(endpoint, {
       method: 'POST',
@@ -39,12 +76,14 @@ export class HFInferenceProvider implements ITranslationProvider {
       },
       body: JSON.stringify({
         model: this.configService.get<string>('HF_MODEL', DEFAULT_MODEL),
-        temperature: 0.2,
+        temperature: 0.1,
+        top_p: 0.9,
+        max_tokens: this.resolveMaxTokens(),
         response_format: { type: 'json_object' },
         messages: [
           {
             role: 'system',
-            content: input.profile.instructions,
+            content: this.buildSystemPrompt(input, previousError),
           },
           {
             role: 'user',
@@ -58,7 +97,11 @@ export class HFInferenceProvider implements ITranslationProvider {
       }),
     });
 
-    this.logger.log(`AI Provider returned status: ${res.status}`);
+    this.logger.log(
+      `AI Provider returned status: ${res.status} for request ${
+        input.requestId || 'unknown'
+      } attempt ${attempt}`,
+    );
 
     if (!res.ok) {
       const errorText = await res.text();
@@ -85,25 +128,13 @@ export class HFInferenceProvider implements ITranslationProvider {
       throw new EmptyTranslationError();
     }
 
-    let jsonText = rawContent;
-    if (jsonText.startsWith('```')) {
-      jsonText = jsonText.replace(/^```(?:json)?\n?/i, '').replace(/```\s*$/, '').trim();
-    }
-
-    let parsed: { paragraphs?: Array<{ id: string; text: string }> };
-    try {
-      parsed = JSON.parse(jsonText) as {
-        paragraphs?: Array<{ id: string; text: string }>;
-      };
-    } catch (error) {
-      throw new TranslationProviderError(
-        `INVALID_PROVIDER_JSON:${String(error)} | Raw: ${rawContent.substring(0, 500)}`,
-      );
-    }
+    const parsed = this.parseProviderJson(rawContent);
 
     if (!parsed.paragraphs?.length) {
       throw new EmptyTranslationError();
     }
+
+    this.assertNoCjkInTranslation(parsed.paragraphs);
 
     return {
       paragraphs: parsed.paragraphs,
@@ -113,5 +144,97 @@ export class HFInferenceProvider implements ITranslationProvider {
       outputTokens: data.usage?.completion_tokens,
       finishReason: data.choices?.[0]?.finish_reason,
     };
+  }
+
+  private buildSystemPrompt(
+    input: TranslationChunkRequest,
+    previousError: unknown,
+  ): string {
+    if (!previousError) {
+      return input.profile.instructions;
+    }
+
+    const errorMessage =
+      previousError instanceof Error ? previousError.message : String(previousError);
+
+    return [
+      input.profile.instructions,
+      'Lần trả lời trước không hợp lệ.',
+      `Lỗi cần sửa: ${errorMessage.substring(0, 500)}`,
+      'Hãy trả lời lại từ đầu, chỉ JSON hợp lệ, dịch sạch toàn bộ chữ Trung sang tiếng Việt, không giữ chữ Hán/CJK trong text.',
+    ].join('\n');
+  }
+
+  private parseProviderJson(rawContent: string): {
+    paragraphs?: Array<{ id: string; text: string }>;
+  } {
+    let jsonText = rawContent.trim();
+    if (jsonText.startsWith('```')) {
+      jsonText = jsonText
+        .replace(/^```(?:json)?\n?/i, '')
+        .replace(/```\s*$/, '')
+        .trim();
+    }
+
+    try {
+      return JSON.parse(jsonText) as {
+        paragraphs?: Array<{ id: string; text: string }>;
+      };
+    } catch (error) {
+      throw new TranslationProviderError(
+        `INVALID_PROVIDER_JSON:${String(error)} | Raw: ${rawContent.substring(
+          0,
+          500,
+        )}`,
+      );
+    }
+  }
+
+  private assertNoCjkInTranslation(
+    paragraphs: Array<{ id: string; text: string }>,
+  ): void {
+    const leakedParagraph = paragraphs.find((paragraph) =>
+      CJK_CHARACTER_PATTERN.test(paragraph.text),
+    );
+
+    if (!leakedParagraph) {
+      return;
+    }
+
+    throw new TranslationProviderError(
+      `UNTRANSLATED_CJK:${leakedParagraph.id}`,
+    );
+  }
+
+  private shouldRetryProviderOutput(error: unknown, attempt: number): boolean {
+    if (attempt >= DEFAULT_MAX_ATTEMPTS) {
+      return false;
+    }
+
+    if (error instanceof EmptyTranslationError) {
+      return true;
+    }
+
+    if (!(error instanceof TranslationProviderError)) {
+      return false;
+    }
+
+    return (
+      error.message.includes('INVALID_PROVIDER_JSON') ||
+      error.message.includes('UNTRANSLATED_CJK')
+    );
+  }
+
+  private resolveMaxTokens(): number {
+    const configuredValue = Number.parseInt(
+      this.configService.get<string>('HF_MAX_TOKENS') ?? '',
+      10,
+    );
+
+    if (Number.isNaN(configuredValue)) {
+      return DEFAULT_MAX_TOKENS;
+    }
+
+    return Math.max(1024, configuredValue);
   }
 }

@@ -54,8 +54,6 @@ export interface TranslationJobPayload {
   enqueueFollowingChapters?: boolean;
 }
 
-const PROGRESS_EVENT_INTERVAL = 2;
-
 @Processor(QUEUE_TRANSLATION, {
   concurrency: TRANSLATION_WORKER_CONCURRENCY,
   stalledInterval: 300000,
@@ -96,7 +94,8 @@ export class TranslationWorker extends WorkerHost {
       return;
     }
 
-    const revision = job.data.translationRevision ?? chapter.translationRevision;
+    const revision =
+      job.data.translationRevision ?? chapter.translationRevision;
 
     if (chapter.translationRevision !== revision) {
       this.logger.warn(
@@ -106,8 +105,13 @@ export class TranslationWorker extends WorkerHost {
       return;
     }
 
-    await this.ensureChapterJobsRunning(chapter.id, job.data.chapterJobId, revision);
+    await this.ensureChapterJobsRunning(
+      chapter.id,
+      job.data.chapterJobId,
+      revision,
+    );
     const chunks = await this.prepareChunks(chapter, revision);
+    await this.emitProgress(chapter.id, revision);
 
     if (chunks.length === 0) {
       await this.failChapter(
@@ -134,14 +138,20 @@ export class TranslationWorker extends WorkerHost {
         index + TRANSLATION_WORKER_CONCURRENCY,
       );
 
-      await Promise.all(batch.map((chunk) => this.processChunk(chapter, chunk)));
-      await this.emitProgress(chapter.id, revision);
+      await Promise.all(
+        batch.map((chunk) =>
+          this.processChunk(chapter, chunk, job.data.chapterJobId),
+        ),
+      );
     }
 
     const refreshedChapter = await this.chapterRepo.findOne({
       where: { id: chapter.id },
     });
-    if (!refreshedChapter || refreshedChapter.translationRevision !== revision) {
+    if (
+      !refreshedChapter ||
+      refreshedChapter.translationRevision !== revision
+    ) {
       return;
     }
 
@@ -232,6 +242,7 @@ export class TranslationWorker extends WorkerHost {
   private async processChunk(
     chapter: Chapter,
     chunk: ChapterChunk,
+    chapterJobId: string | undefined,
   ): Promise<void> {
     if (chunk.status === ChapterChunkStatus.DONE) {
       return;
@@ -252,7 +263,10 @@ export class TranslationWorker extends WorkerHost {
       },
     );
 
-    if (claimResult.affected === 0 && chunk.status !== ChapterChunkStatus.TRANSLATING) {
+    if (
+      claimResult.affected === 0 &&
+      chunk.status !== ChapterChunkStatus.TRANSLATING
+    ) {
       return;
     }
 
@@ -285,13 +299,20 @@ export class TranslationWorker extends WorkerHost {
         outputTokens: result.outputTokens ?? 0,
         finishedAt: new Date(),
       });
+      await this.flushChunkProgress(
+        chapter,
+        chapter.translationRevision,
+        chapterJobId,
+      );
     } catch (error) {
       if (error instanceof ProviderColdStartError) {
         throw error;
       }
 
       const message =
-        error instanceof TranslationProviderError ? error.message : String(error);
+        error instanceof TranslationProviderError
+          ? error.message
+          : String(error);
 
       await this.chunkRepo.update(chunk.id, {
         status: ChapterChunkStatus.FAILED,
@@ -299,7 +320,71 @@ export class TranslationWorker extends WorkerHost {
         errorMessage: message,
         finishedAt: new Date(),
       });
+      await this.flushChunkProgress(
+        chapter,
+        chapter.translationRevision,
+        chapterJobId,
+      );
     }
+  }
+
+  private async flushChunkProgress(
+    chapter: Chapter,
+    revision: number,
+    chapterJobId: string | undefined,
+  ): Promise<void> {
+    const progress = await this.getChunkProgress(chapter.id, revision);
+    if (progress.totalChunks === 0) {
+      return;
+    }
+
+    const percent = Math.floor(
+      (progress.completedChunks / progress.totalChunks) * 100,
+    );
+
+    await this.chapterRepo
+      .createQueryBuilder()
+      .update(Chapter)
+      .set({
+        totalSegments: progress.totalChunks,
+        completedSegments: () =>
+          `GREATEST("completedSegments", ${progress.completedChunks})`,
+      })
+      .where('id = :chapterId', { chapterId: chapter.id })
+      .andWhere('"translationRevision" = :revision', { revision })
+      .execute();
+
+    if (chapterJobId) {
+      await this.jobRepo
+        .createQueryBuilder()
+        .update(TranslationJob)
+        .set({
+          status: JobStatus.RUNNING,
+          progressPercent: () => `GREATEST("progressPercent", ${percent})`,
+          translationRevision: revision,
+        })
+        .where('id = :chapterJobId', { chapterJobId })
+        .execute();
+    }
+
+    await this.novelCacheService.invalidateBookAndChapterCaches(
+      chapter.bookId,
+      chapter.id,
+    );
+
+    this.eventEmitter.emit('chapter.progress', {
+      bookId: chapter.bookId,
+      chapterId: chapter.id,
+      revision,
+      stage: 'translating',
+      completedChunks: progress.completedChunks,
+      totalChunks: progress.totalChunks,
+      failedChunks: progress.failedChunks,
+      completed: progress.completedChunks,
+      total: progress.totalChunks,
+      percent,
+      status: ChapterStatus.TRANSLATING,
+    });
   }
 
   private validateChunkResult(
@@ -307,7 +392,9 @@ export class TranslationWorker extends WorkerHost {
     result: TranslationChunkResult,
   ): string {
     const expectedParagraphIds = chunk.paragraphIds;
-    const actualParagraphIds = result.paragraphs.map((paragraph) => paragraph.id);
+    const actualParagraphIds = result.paragraphs.map(
+      (paragraph) => paragraph.id,
+    );
 
     if (expectedParagraphIds.length !== actualParagraphIds.length) {
       throw new TranslationProviderError('INVALID_PARAGRAPH_COUNT');
@@ -413,7 +500,9 @@ export class TranslationWorker extends WorkerHost {
       await this.jobRepo.update(chapterJobId, {
         status: JobStatus.FAILED,
         progressPercent:
-          chunks.length === 0 ? 0 : Math.floor((completedCount / chunks.length) * 100),
+          chunks.length === 0
+            ? 0
+            : Math.floor((completedCount / chunks.length) * 100),
         translationRevision: chapter.translationRevision,
         errorCode,
         errorMessage,
@@ -424,7 +513,12 @@ export class TranslationWorker extends WorkerHost {
       chapter.bookId,
       chapter.id,
     );
-    await this.emitProgress(chapter.id, chapter.translationRevision, false, true);
+    await this.emitProgress(
+      chapter.id,
+      chapter.translationRevision,
+      false,
+      true,
+    );
     await this.updateBookState(chapter.bookId, bookJobId, false);
   }
 
@@ -454,34 +548,23 @@ export class TranslationWorker extends WorkerHost {
     isCompleted = false,
     isFailed = false,
   ): Promise<void> {
-    const chunks = await this.chunkRepo.find({
-      where: { chapterId, translationRevision: revision },
+    const chapter = await this.chapterRepo.findOne({
+      where: { id: chapterId },
     });
-    const chapter = await this.chapterRepo.findOne({ where: { id: chapterId } });
-    if (!chapter || chapter.translationRevision !== revision || chunks.length === 0) {
+    if (!chapter || chapter.translationRevision !== revision) {
       return;
     }
 
-    const completedChunks = chunks.filter(
-      (chunk) => chunk.status === ChapterChunkStatus.DONE,
-    ).length;
-    const failedChunks = chunks.filter(
-      (chunk) => chunk.status === ChapterChunkStatus.FAILED,
-    ).length;
-    const totalChunks = chunks.length;
+    const { completedChunks, failedChunks, totalChunks } =
+      await this.getChunkProgress(chapterId, revision);
+    if (totalChunks === 0) {
+      return;
+    }
 
     await this.chapterRepo.update(chapterId, {
       totalSegments: totalChunks,
       completedSegments: completedChunks,
     });
-
-    if (
-      !isCompleted &&
-      !isFailed &&
-      completedChunks % PROGRESS_EVENT_INTERVAL !== 0
-    ) {
-      return;
-    }
 
     const percent =
       totalChunks === 0 ? 0 : Math.floor((completedChunks / totalChunks) * 100);
@@ -501,6 +584,44 @@ export class TranslationWorker extends WorkerHost {
     });
   }
 
+  private async getChunkProgress(
+    chapterId: string,
+    revision: number,
+  ): Promise<{
+    completedChunks: number;
+    failedChunks: number;
+    totalChunks: number;
+  }> {
+    const row = await this.chunkRepo
+      .createQueryBuilder('chunk')
+      .select('COUNT(chunk.id)::int', 'totalChunks')
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN chunk.status = :done THEN 1 ELSE 0 END), 0)::int`,
+        'completedChunks',
+      )
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN chunk.status = :failed THEN 1 ELSE 0 END), 0)::int`,
+        'failedChunks',
+      )
+      .where('chunk.chapterId = :chapterId', { chapterId })
+      .andWhere('chunk.translationRevision = :revision', { revision })
+      .setParameters({
+        done: ChapterChunkStatus.DONE,
+        failed: ChapterChunkStatus.FAILED,
+      })
+      .getRawOne<{
+        completedChunks: number | string;
+        failedChunks: number | string;
+        totalChunks: number | string;
+      }>();
+
+    return {
+      completedChunks: Number(row?.completedChunks ?? 0),
+      failedChunks: Number(row?.failedChunks ?? 0),
+      totalChunks: Number(row?.totalChunks ?? 0),
+    };
+  }
+
   private async updateBookState(
     bookId: string,
     bookJobId: string | undefined,
@@ -511,15 +632,20 @@ export class TranslationWorker extends WorkerHost {
       order: { chapterNumber: 'ASC', createdAt: 'ASC' },
     });
 
-    const allDone = chapters.length > 0 && chapters.every((c) => c.status === ChapterStatus.DONE);
+    const allDone =
+      chapters.length > 0 &&
+      chapters.every((c) => c.status === ChapterStatus.DONE);
     const allFailed =
-      chapters.length > 0 && chapters.every((c) => c.status === ChapterStatus.FAILED);
+      chapters.length > 0 &&
+      chapters.every((c) => c.status === ChapterStatus.FAILED);
     const anyFailed = chapters.some((c) => c.status === ChapterStatus.FAILED);
     const anyDone = chapters.some((c) => c.status === ChapterStatus.DONE);
     const anyActive = chapters.some((c) =>
-      [ChapterStatus.PENDING, ChapterStatus.TRANSLATING, ChapterStatus.SPLITTING].includes(
-        c.status,
-      ),
+      [
+        ChapterStatus.PENDING,
+        ChapterStatus.TRANSLATING,
+        ChapterStatus.SPLITTING,
+      ].includes(c.status),
     );
 
     let status = BookStatus.PROCESSING;
@@ -613,7 +739,10 @@ export class TranslationWorker extends WorkerHost {
       {
         chapterId,
         translationRevision,
-        status: In([ChapterChunkStatus.PENDING, ChapterChunkStatus.TRANSLATING]),
+        status: In([
+          ChapterChunkStatus.PENDING,
+          ChapterChunkStatus.TRANSLATING,
+        ]),
       },
       { status: ChapterChunkStatus.STALE },
     );
