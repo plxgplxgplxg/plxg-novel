@@ -34,7 +34,7 @@ import { ProgressModule } from './modules/progress/progress.module';
         entities: [User, Book, Chapter, Segment, ChapterChunk, TranslationJob],
         migrations: ['dist/database/migrations/*.js'],
         synchronize: config.get('NODE_ENV') !== 'production',
-        logging: config.get('NODE_ENV') === 'development' ? 'all' : ['error'],
+        logging: ['error'],
         ssl:
           config.get('DB_SSL') === 'true' ||
           config.get('DB_HOST', '').includes('aivencloud.com')

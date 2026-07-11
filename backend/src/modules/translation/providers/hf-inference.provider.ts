@@ -35,7 +35,7 @@ export class HFInferenceProvider implements ITranslationProvider {
       body: JSON.stringify({
         model: this.configService.get<string>('HF_MODEL', DEFAULT_MODEL),
         temperature: 0.2,
-        max_tokens: 512,
+        max_tokens: 4096,
         response_format: { type: 'json_object' },
         messages: [
           {

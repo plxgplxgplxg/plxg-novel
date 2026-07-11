@@ -5,7 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { IsNull, Repository, In } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import {
@@ -372,7 +372,36 @@ export class BookService {
       throw new BadRequestException('No chapters to translate');
     }
 
-    return this.enqueueChaptersForTranslation(id, pendingChapters);
+    const chapterIds = pendingChapters.map((c) => c.id);
+    await this.chapterRepo.manager.transaction(async (manager) => {
+      await manager.query(`DELETE FROM chapter_chunks WHERE "chapter_id" = ANY($1)`, [chapterIds]);
+      await manager.query(`DELETE FROM segments WHERE "chapter_id" = ANY($1)`, [chapterIds]);
+      await manager.query(`DELETE FROM translation_jobs WHERE "chapter_id" = ANY($1)`, [chapterIds]);
+      
+      await manager.createQueryBuilder()
+        .update(Chapter)
+        .set({
+          status: ChapterStatus.PENDING,
+          totalSegments: 0,
+          completedSegments: 0,
+          translatedContent: '',
+          mergedContent: null,
+          mergedAt: null,
+          segmentsHash: null,
+          mergedMetadata: null,
+          mergeVersion: () => '"mergeVersion" + 1',
+          translationRevision: () => '"translationRevision" + 1',
+        })
+        .where('id IN (:...ids)', { ids: chapterIds })
+        .execute();
+    });
+
+    const refreshedChapters = await this.chapterRepo.find({
+      where: { id: In(chapterIds) },
+      order: { chapterNumber: 'ASC' }
+    });
+
+    return this.enqueueChaptersForTranslation(id, refreshedChapters);
   }
 
   async softDelete(id: string, userId: string): Promise<void> {
