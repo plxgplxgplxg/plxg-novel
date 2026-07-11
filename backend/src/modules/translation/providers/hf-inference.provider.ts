@@ -11,7 +11,7 @@ import {
   TranslationProviderError,
 } from '../interfaces/translation-errors';
 
-const DEFAULT_ENDPOINT = 'https://bubble-reactive-framing.ngrok-free.dev/v1/chat/completions';
+const DEFAULT_ENDPOINT = 'https://having-pharmaceuticals-chargers-transportation.trycloudflare.com/v1/chat/completions';
 const DEFAULT_MODEL = 'configured-literary-translation-model';
 
 @Injectable()
