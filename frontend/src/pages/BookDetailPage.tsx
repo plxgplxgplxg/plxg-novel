@@ -1,8 +1,14 @@
 import { useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { createBookProgressStreamUrl, fetchBookDetails, retranslateChapter } from '../api';
+import {
+  createBookProgressStreamUrl,
+  fetchBookDetails,
+  retranslateChapter,
+  type BookProgressEvent,
+} from '../api';
 import { ChevronLeft, BookOpen, ListOrdered, ScrollText } from 'lucide-react';
+import type { BookDetail } from '../store';
 
 const STATUS_LABELS = {
   draft: 'Nháp',
@@ -50,23 +56,52 @@ const BookDetailPage = () => {
   });
 
   useEffect(() => {
-    if (
-      !bookId ||
-      !book?.canManage ||
-      !['draft', 'processing'].includes(book.status)
-    ) {
+    if (!bookId || !book?.canManage) {
       return;
     }
 
     const stream = new EventSource(createBookProgressStreamUrl(bookId));
-    stream.onmessage = () => {
+    stream.onmessage = (message) => {
+      const progress = JSON.parse(message.data) as BookProgressEvent;
+      queryClient.setQueryData<BookDetail>(['book', bookId], (current) => {
+        if (!current) return current;
+
+        const chapters = current.chapters.map((chapter) =>
+          chapter.id === progress.chapterId
+            ? {
+                ...chapter,
+                status: progress.status ?? chapter.status,
+                totalSegments: progress.total,
+                completedSegments: progress.completed,
+                hasReadableContent: progress.completed > 0,
+              }
+            : chapter,
+        );
+
+        return {
+          ...current,
+          status:
+            current.status === 'draft' && progress.total > 0
+              ? 'processing'
+              : current.status,
+          totalSegments: chapters.reduce(
+            (sum, chapter) => sum + chapter.totalSegments,
+            0,
+          ),
+          completedSegments: chapters.reduce(
+            (sum, chapter) => sum + chapter.completedSegments,
+            0,
+          ),
+          chapters,
+        };
+      });
       queryClient.invalidateQueries({ queryKey: ['book', bookId] });
       queryClient.invalidateQueries({ queryKey: ['books'] });
     };
     stream.onerror = () => stream.close();
 
     return () => stream.close();
-  }, [book?.canManage, book?.status, bookId, queryClient]);
+  }, [book?.canManage, bookId, queryClient]);
 
   if (isLoading) {
     return (

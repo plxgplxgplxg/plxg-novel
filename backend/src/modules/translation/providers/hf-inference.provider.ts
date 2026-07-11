@@ -141,6 +141,7 @@ export class HFInferenceProvider implements ITranslationProvider {
       inputTokens: data.usage?.prompt_tokens,
       outputTokens: data.usage?.completion_tokens,
       finishReason: data.choices?.[0]?.finish_reason,
+      attempt,
     };
   }
 

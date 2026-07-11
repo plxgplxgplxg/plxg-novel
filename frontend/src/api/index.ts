@@ -134,6 +134,15 @@ export const createBookProgressStreamUrl = (bookId: string) => {
   return url.toString();
 };
 
+export interface BookProgressEvent {
+  bookId: string;
+  chapterId: string;
+  completed: number;
+  total: number;
+  percent: number;
+  status?: 'pending' | 'splitting' | 'translating' | 'done' | 'failed';
+}
+
 export const fetchChapter = async (chapterId: string): Promise<ChapterDetail> => {
   const res = await apiClient.get(`/chapters/${chapterId}`);
   return res.data;

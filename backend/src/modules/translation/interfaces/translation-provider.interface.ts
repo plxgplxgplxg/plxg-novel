@@ -24,6 +24,7 @@ export interface TranslationChunkResult {
   inputTokens?: number;
   outputTokens?: number;
   finishReason?: string;
+  attempt?: number;
 }
 
 export interface ITranslationProvider {

@@ -60,6 +60,7 @@ export class ChapterChunk {
   structuredOutput:
     | {
         paragraphs: Array<{ id: string; text: string }>;
+        providerAttempt?: number;
       }
     | null;
 

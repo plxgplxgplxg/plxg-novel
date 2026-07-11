@@ -293,12 +293,18 @@ export class TranslationWorker extends WorkerHost {
       await this.chunkRepo.update(chunk.id, {
         status: ChapterChunkStatus.DONE,
         translatedText,
-        structuredOutput: { paragraphs: result.paragraphs },
+        structuredOutput: {
+          paragraphs: result.paragraphs,
+          providerAttempt: result.attempt ?? 1,
+        },
         providerModel: result.model,
         inputTokens: result.inputTokens ?? 0,
         outputTokens: result.outputTokens ?? 0,
         finishedAt: new Date(),
       });
+      this.logger.log(
+        `Chunk translated chapterId=${chapter.id} chunkId=${chunk.id} providerAttempt=${result.attempt ?? 1}`,
+      );
       await this.flushChunkProgress(
         chapter,
         chapter.translationRevision,
@@ -370,6 +376,10 @@ export class TranslationWorker extends WorkerHost {
     await this.novelCacheService.invalidateBookAndChapterCaches(
       chapter.bookId,
       chapter.id,
+    );
+
+    this.logger.log(
+      `Chunk progress flushed chapterId=${chapter.id} revision=${revision} completed=${progress.completedChunks}/${progress.totalChunks} failed=${progress.failedChunks}`,
     );
 
     this.eventEmitter.emit('chapter.progress', {

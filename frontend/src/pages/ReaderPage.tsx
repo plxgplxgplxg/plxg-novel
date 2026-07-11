@@ -1,8 +1,15 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { createBookProgressStreamUrl, fetchBookDetails, fetchChapter, retranslateChapter } from '../api';
+import {
+  createBookProgressStreamUrl,
+  fetchBookDetails,
+  fetchChapter,
+  retranslateChapter,
+  type BookProgressEvent,
+} from '../api';
 import { ChevronLeft, ChevronRight, List, LibraryBig, RefreshCw } from 'lucide-react';
+import type { BookDetail, ChapterDetail } from '../store';
 
 const isChapterReadable = (chapter?: {
   totalSegments: number;
@@ -53,7 +60,55 @@ const ReaderPage = () => {
     if (!bookId || !book?.canManage) return;
 
     const stream = new EventSource(createBookProgressStreamUrl(bookId));
-    stream.onmessage = () => {
+    stream.onmessage = (message) => {
+      const progress = JSON.parse(message.data) as BookProgressEvent;
+      queryClient.setQueryData<BookDetail>(['book', bookId], (current) => {
+        if (!current) return current;
+
+        const chapters = current.chapters.map((chapter) =>
+          chapter.id === progress.chapterId
+            ? {
+                ...chapter,
+                status: progress.status ?? chapter.status,
+                totalSegments: progress.total,
+                completedSegments: progress.completed,
+                hasReadableContent: progress.completed > 0,
+              }
+            : chapter,
+        );
+
+        return {
+          ...current,
+          status:
+            current.status === 'draft' && progress.total > 0
+              ? 'processing'
+              : current.status,
+          totalSegments: chapters.reduce(
+            (sum, chapter) => sum + chapter.totalSegments,
+            0,
+          ),
+          completedSegments: chapters.reduce(
+            (sum, chapter) => sum + chapter.completedSegments,
+            0,
+          ),
+          chapters,
+        };
+      });
+      if (chapterId === progress.chapterId) {
+        queryClient.setQueryData<ChapterDetail>(
+          ['chapter', chapterId],
+          (current) =>
+            current
+              ? {
+                  ...current,
+                  status: progress.status ?? current.status,
+                  totalSegments: progress.total,
+                  completedSegments: progress.completed,
+                  hasReadableContent: progress.completed > 0,
+                }
+              : current,
+        );
+      }
       queryClient.invalidateQueries({ queryKey: ['book', bookId] });
       if (chapterId) {
         queryClient.invalidateQueries({ queryKey: ['chapter', chapterId] });
