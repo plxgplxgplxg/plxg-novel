@@ -15,6 +15,7 @@ function createWorker(overrides: {
   eventEmitter?: Record<string, unknown>;
   novelCacheService?: Record<string, unknown>;
   concurrencyGate?: Record<string, unknown>;
+  configService?: Record<string, unknown>;
 } = {}) {
   return new TranslationWorker(
     overrides.chapterRepo as never,
@@ -27,6 +28,7 @@ function createWorker(overrides: {
     overrides.eventEmitter as never,
     overrides.novelCacheService as never,
     overrides.concurrencyGate as never,
+    (overrides.configService ?? { get: jest.fn() }) as never,
   );
 }
 
@@ -97,6 +99,7 @@ describe('TranslationWorker', () => {
     };
     const novelCacheService = {
       invalidateBookAndChapterCaches: jest.fn().mockResolvedValue(undefined),
+      invalidateChapterRead: jest.fn().mockResolvedValue(undefined),
     };
     const worker = createWorker({
       chapterRepo,
@@ -124,8 +127,7 @@ describe('TranslationWorker', () => {
         }),
       }),
     );
-    expect(novelCacheService.invalidateBookAndChapterCaches).toHaveBeenCalledWith(
-      'book-1',
+    expect(novelCacheService.invalidateChapterRead).toHaveBeenCalledWith(
       'chapter-1',
     );
     expect(eventEmitter.emit).toHaveBeenCalledWith(
@@ -142,16 +144,9 @@ describe('TranslationWorker', () => {
 
   it('delays a chapter job when an earlier chapter in the same book is not done', async () => {
     const previousChapterQuery = {
-      select: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      addOrderBy: jest.fn().mockReturnThis(),
-      getOne: jest.fn().mockResolvedValue({
-        id: 'chapter-1',
-        chapterNumber: 1,
-        status: ChapterStatus.TRANSLATING,
-      }),
+      getCount: jest.fn().mockResolvedValue(2),
     };
     const chapterRepo = {
       findOne: jest.fn().mockResolvedValue({
@@ -171,6 +166,11 @@ describe('TranslationWorker', () => {
       eventEmitter: {},
       novelCacheService: {},
       concurrencyGate: {},
+      configService: {
+        get: jest.fn((key: string) =>
+          key === 'TRANSLATION_CHAPTERS_PER_BOOK' ? '2' : undefined,
+        ),
+      },
     });
     const job = {
       data: {

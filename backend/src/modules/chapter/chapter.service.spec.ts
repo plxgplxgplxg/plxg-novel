@@ -67,6 +67,7 @@ describe('ChapterService', () => {
       {} as never,
       redisCacheService as never,
       novelCacheService as never,
+      { get: jest.fn() } as never,
     );
 
     const result = await service.findOne('chapter-1', 'owner-1');
@@ -152,6 +153,7 @@ describe('ChapterService', () => {
       rawCacheQueue as never,
       redisCacheService as never,
       novelCacheService as never,
+      { get: jest.fn() } as never,
     );
 
     const result = await service.findOne('chapter-1', 'owner-1');
@@ -234,6 +236,7 @@ describe('ChapterService', () => {
           .fn()
           .mockReturnValue('chapter:read:chapter-1:v2:user:owner-1'),
       } as never,
+      { get: jest.fn() } as never,
     );
 
     await service.findOne('chapter-1', 'owner-1');
@@ -313,6 +316,7 @@ describe('ChapterService', () => {
           .fn()
           .mockReturnValue('chapter:read:chapter-1:v3:user:owner-1'),
       } as never,
+      { get: jest.fn() } as never,
     );
 
     const result = await service.findOne('chapter-1', 'owner-1');

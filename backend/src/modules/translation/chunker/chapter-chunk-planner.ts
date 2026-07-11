@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
+import {
+  DEFAULT_TRANSLATION_CHUNK_SIZE,
+  MAX_TRANSLATION_CHUNK_SIZE,
+  MIN_TRANSLATION_CHUNK_SIZE,
+} from '../../../queue/queue.constants';
 
-const TARGET_CHUNK_SIZE = 800;
 const CONTEXT_TAIL_LENGTH = 280;
 
 export interface PlannedParagraph {
@@ -18,14 +22,24 @@ export interface PlannedChunk {
   sourceHash: string;
 }
 
+export interface ChapterChunkPlannerOptions {
+  targetChunkSize?: number;
+}
+
 @Injectable()
 export class ChapterChunkPlanner {
-  plan(rawContent: string): PlannedChunk[] {
+  plan(
+    rawContent: string,
+    options: ChapterChunkPlannerOptions = {},
+  ): PlannedChunk[] {
     const paragraphs = this.extractParagraphs(rawContent);
     if (paragraphs.length === 0) {
       return [];
     }
 
+    const targetChunkSize = this.normalizeTargetChunkSize(
+      options.targetChunkSize,
+    );
     const chunks: PlannedChunk[] = [];
     let chunkParagraphs: PlannedParagraph[] = [];
     let chunkLength = 0;
@@ -57,7 +71,7 @@ export class ChapterChunkPlanner {
     for (const paragraph of paragraphs) {
       if (
         chunkParagraphs.length > 0 &&
-        chunkLength + paragraph.text.length > TARGET_CHUNK_SIZE
+        chunkLength + paragraph.text.length > targetChunkSize
       ) {
         flushChunk();
       }
@@ -68,6 +82,17 @@ export class ChapterChunkPlanner {
 
     flushChunk();
     return chunks;
+  }
+
+  private normalizeTargetChunkSize(value: number | undefined): number {
+    if (!value || Number.isNaN(value)) {
+      return DEFAULT_TRANSLATION_CHUNK_SIZE;
+    }
+
+    return Math.min(
+      MAX_TRANSLATION_CHUNK_SIZE,
+      Math.max(MIN_TRANSLATION_CHUNK_SIZE, value),
+    );
   }
 
   private extractParagraphs(rawContent: string): PlannedParagraph[] {

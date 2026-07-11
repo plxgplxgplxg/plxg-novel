@@ -49,6 +49,7 @@ describe('BookService', () => {
       {} as never,
       redisCacheService as never,
       novelCacheService as never,
+      { get: jest.fn() } as never,
     );
 
     const result = await service.findOneVisibleWithChapters('book-1', 'owner-1');

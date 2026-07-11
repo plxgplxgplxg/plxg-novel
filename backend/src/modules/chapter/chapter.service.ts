@@ -6,6 +6,7 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -37,6 +38,7 @@ import {
   BULLMQ_BACKOFF_CONFIG,
   MAX_RETRY_ATTEMPTS,
 } from '../../queue/queue.constants';
+import { resolveBookChapterConcurrency } from '../../queue/translation-tuning';
 import {
   buildRawChapterContent,
   buildReadableChapterContent,
@@ -146,6 +148,7 @@ export class ChapterService {
     private readonly rawCacheQueue: Queue,
     private readonly redisCacheService: RedisCacheService,
     private readonly novelCacheService: NovelCacheService,
+    private readonly configService: ConfigService,
   ) {}
 
   async addChapter(
@@ -762,44 +765,63 @@ export class ChapterService {
       }),
     );
 
-    const chapterJob = await this.jobRepo.save(
-      this.jobRepo.create({
-        bookId,
-        chapterId: firstChapter.id,
-        jobType: JobType.TRANSLATE_CHAPTER,
-        status: JobStatus.QUEUED,
-        translationRevision: firstChapter.translationRevision,
-      }),
-    );
-
     await this.bookRepo.update(bookId, { status: BookStatus.PROCESSING });
     await this.novelCacheService.invalidateBookAndChapterCaches(bookId);
 
-    const bullmqJobId = `translate-chapter:${firstChapter.id}:${firstChapter.translationRevision}`;
-
-    await this.translationQueue.add(
-      'translate-chapter',
-      {
-        chapterId: firstChapter.id,
-        bookJobId: bookJob.id,
-        chapterJobId: chapterJob.id,
-        translationRevision: firstChapter.translationRevision,
-        enqueueFollowingChapters,
-      },
-      {
-        jobId: bullmqJobId,
-        attempts: MAX_RETRY_ATTEMPTS,
-        backoff: BULLMQ_BACKOFF_CONFIG,
-        removeOnComplete: true,
-        removeOnFail: true,
-      },
+    await this.enqueueChapterWindow(
+      bookId,
+      bookJob.id,
+      orderedChapters.slice(
+        0,
+        resolveBookChapterConcurrency(this.configService),
+      ),
+      enqueueFollowingChapters,
     );
 
-    await this.jobRepo.update(chapterJob.id, {
-      bullmqJobId,
-    });
-
     return bookJob.id;
+  }
+
+  private async enqueueChapterWindow(
+    bookId: string,
+    bookJobId: string,
+    chapters: Chapter[],
+    enqueueFollowingChapters: boolean,
+  ): Promise<void> {
+    for (const chapter of chapters) {
+      const chapterJob = await this.jobRepo.save(
+        this.jobRepo.create({
+          bookId,
+          chapterId: chapter.id,
+          jobType: JobType.TRANSLATE_CHAPTER,
+          status: JobStatus.QUEUED,
+          translationRevision: chapter.translationRevision,
+        }),
+      );
+
+      const bullmqJobId = `translate-chapter:${chapter.id}:${chapter.translationRevision}`;
+
+      await this.translationQueue.add(
+        'translate-chapter',
+        {
+          chapterId: chapter.id,
+          bookJobId,
+          chapterJobId: chapterJob.id,
+          translationRevision: chapter.translationRevision,
+          enqueueFollowingChapters,
+        },
+        {
+          jobId: bullmqJobId,
+          attempts: MAX_RETRY_ATTEMPTS,
+          backoff: BULLMQ_BACKOFF_CONFIG,
+          removeOnComplete: true,
+          removeOnFail: true,
+        },
+      );
+
+      await this.jobRepo.update(chapterJob.id, {
+        bullmqJobId,
+      });
+    }
   }
 
   private extractChaptersFromText(text: string): ParsedChapterBlock[] {

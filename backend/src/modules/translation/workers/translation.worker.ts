@@ -3,6 +3,7 @@ import { DelayedError, Job, Queue } from 'bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Inject, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NovelCacheService } from '../../../cache/novel-cache.service';
 import {
@@ -32,10 +33,15 @@ import {
 import {
   BULLMQ_BACKOFF_CONFIG,
   CHAPTER_ORDER_RETRY_DELAY_MS,
+  CHUNK_FAILURE_RATE_SAMPLE_SIZE,
+  DEFAULT_TRANSLATION_CHUNK_SIZE,
+  HIGH_FAILURE_TRANSLATION_CHUNK_SIZE,
+  LOW_FAILURE_TRANSLATION_CHUNK_SIZE,
   MAX_RETRY_ATTEMPTS,
   QUEUE_TRANSLATION,
   TRANSLATION_WORKER_CONCURRENCY,
 } from '../../../queue/queue.constants';
+import { resolveBookChapterConcurrency } from '../../../queue/translation-tuning';
 import { ChapterChunkPlanner } from '../chunker/chapter-chunk-planner';
 import {
   buildReadableChunkContent,
@@ -81,6 +87,7 @@ export class TranslationWorker extends WorkerHost {
     private readonly eventEmitter: EventEmitter2,
     private readonly novelCacheService: NovelCacheService,
     private readonly concurrencyGate: TranslationConcurrencyService,
+    private readonly configService: ConfigService,
   ) {
     super();
   }
@@ -203,7 +210,10 @@ export class TranslationWorker extends WorkerHost {
       return existingChunks;
     }
 
-    const plannedChunks = this.planner.plan(chapter.rawContent);
+    const targetChunkSize = await this.resolveAdaptiveChunkSize(chapter.bookId);
+    const plannedChunks = this.planner.plan(chapter.rawContent, {
+      targetChunkSize,
+    });
 
     await this.chunkRepo.save(
       plannedChunks.map((plannedChunk) =>
@@ -388,10 +398,7 @@ export class TranslationWorker extends WorkerHost {
         .execute();
     }
 
-    await this.novelCacheService.invalidateBookAndChapterCaches(
-      chapter.bookId,
-      chapter.id,
-    );
+    await this.novelCacheService.invalidateChapterRead(chapter.id);
 
     this.logger.log(
       `Chunk progress flushed chapterId=${chapter.id} revision=${revision} completed=${progress.completedChunks}/${progress.totalChunks} failed=${progress.failedChunks}`,
@@ -587,9 +594,9 @@ export class TranslationWorker extends WorkerHost {
     job: Job<TranslationJobPayload>,
     chapter: Chapter,
   ): Promise<void> {
-    const previousIncompleteChapter = await this.chapterRepo
+    const chapterWindowSize = resolveBookChapterConcurrency(this.configService);
+    const previousIncompleteCount = await this.chapterRepo
       .createQueryBuilder('chapter')
-      .select(['chapter.id', 'chapter.chapterNumber', 'chapter.status'])
       .where('chapter.bookId = :bookId', { bookId: chapter.bookId })
       .andWhere('chapter.chapterNumber < :chapterNumber', {
         chapterNumber: chapter.chapterNumber,
@@ -597,20 +604,51 @@ export class TranslationWorker extends WorkerHost {
       .andWhere('chapter.status != :doneStatus', {
         doneStatus: ChapterStatus.DONE,
       })
-      .orderBy('chapter.chapterNumber', 'ASC')
-      .addOrderBy('chapter.createdAt', 'ASC')
-      .getOne();
+      .getCount();
 
-    if (!previousIncompleteChapter) {
+    if (previousIncompleteCount < chapterWindowSize) {
       return;
     }
 
     const delayUntil = Date.now() + CHAPTER_ORDER_RETRY_DELAY_MS;
     await job.moveToDelayed(delayUntil, job.token);
     this.logger.debug(
-      `Delay chapter translation chapterId=${chapter.id} waitingForChapterId=${previousIncompleteChapter.id}`,
+      `Delay chapter translation chapterId=${chapter.id} previousIncomplete=${previousIncompleteCount} windowSize=${chapterWindowSize}`,
     );
     throw new DelayedError();
+  }
+
+  private async resolveAdaptiveChunkSize(bookId: string): Promise<number> {
+    const recentChunks = await this.chunkRepo
+      .createQueryBuilder('chunk')
+      .innerJoin('chunk.chapter', 'chapter')
+      .select('chunk.status', 'status')
+      .where('chapter.bookId = :bookId', { bookId })
+      .andWhere('chunk.status IN (:...statuses)', {
+        statuses: [ChapterChunkStatus.DONE, ChapterChunkStatus.FAILED],
+      })
+      .orderBy('chunk.updatedAt', 'DESC')
+      .limit(CHUNK_FAILURE_RATE_SAMPLE_SIZE)
+      .getRawMany<{ status: ChapterChunkStatus }>();
+
+    if (recentChunks.length < 8) {
+      return DEFAULT_TRANSLATION_CHUNK_SIZE;
+    }
+
+    const failedCount = recentChunks.filter(
+      (chunk) => chunk.status === ChapterChunkStatus.FAILED,
+    ).length;
+    const failureRate = failedCount / recentChunks.length;
+
+    if (failureRate >= 0.25) {
+      return HIGH_FAILURE_TRANSLATION_CHUNK_SIZE;
+    }
+
+    if (failureRate <= 0.05 && recentChunks.length >= 20) {
+      return LOW_FAILURE_TRANSLATION_CHUNK_SIZE;
+    }
+
+    return DEFAULT_TRANSLATION_CHUNK_SIZE;
   }
 
   private async emitProgress(
@@ -751,16 +789,49 @@ export class TranslationWorker extends WorkerHost {
       return;
     }
 
-    const nextChapter = chapters.find(
-      (candidate) =>
-        candidate.status === ChapterStatus.PENDING ||
-        candidate.status === ChapterStatus.FAILED,
+    const chapterWindowSize = resolveBookChapterConcurrency(this.configService);
+    const activeChapterJobs = await this.jobRepo.find({
+      where: {
+        bookId,
+        jobType: JobType.TRANSLATE_CHAPTER,
+        status: In([JobStatus.QUEUED, JobStatus.RUNNING]),
+      },
+    });
+    const activeChapterIds = new Set(
+      activeChapterJobs
+        .map((activeJob) => activeJob.chapterId)
+        .filter(Boolean),
+    );
+    const availableSlots = Math.max(
+      0,
+      chapterWindowSize - activeChapterIds.size,
     );
 
-    if (!nextChapter) {
+    if (availableSlots === 0) {
       return;
     }
 
+    const nextChapters = chapters
+      .filter(
+        (candidate) =>
+          (candidate.status === ChapterStatus.PENDING ||
+            candidate.status === ChapterStatus.FAILED) &&
+          !activeChapterIds.has(candidate.id),
+      )
+      .slice(0, availableSlots);
+
+    await Promise.all(
+      nextChapters.map((nextChapter) =>
+        this.enqueueFollowingChapter(bookId, bookJobId, nextChapter),
+      ),
+    );
+  }
+
+  private async enqueueFollowingChapter(
+    bookId: string,
+    bookJobId: string | undefined,
+    nextChapter: Chapter,
+  ): Promise<void> {
     const chapterJob = await this.jobRepo.save(
       this.jobRepo.create({
         bookId,
