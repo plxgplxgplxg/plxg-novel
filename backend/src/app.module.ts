@@ -8,6 +8,7 @@ import { Book } from './database/entities/book.entity';
 import { Chapter } from './database/entities/chapter.entity';
 import { Segment } from './database/entities/segment.entity';
 import { TranslationJob } from './database/entities/translation-job.entity';
+import { ChapterChunk } from './database/entities/chapter-chunk.entity';
 import { AuthModule } from './modules/auth/auth.module';
 import { BookModule } from './modules/book/book.module';
 import { ChapterModule } from './modules/chapter/chapter.module';
@@ -30,7 +31,7 @@ import { ProgressModule } from './modules/progress/progress.module';
         username: config.get('DB_USERNAME', 'postgres'),
         password: config.get('DB_PASSWORD', 'postgres'),
         database: config.get('DB_DATABASE', 'novel_translation'),
-        entities: [User, Book, Chapter, Segment, TranslationJob],
+        entities: [User, Book, Chapter, Segment, ChapterChunk, TranslationJob],
         migrations: ['dist/database/migrations/*.js'],
         synchronize: config.get('NODE_ENV') !== 'production',
         logging: config.get('NODE_ENV') === 'development' ? 'all' : ['error'],

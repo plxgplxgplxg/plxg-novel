@@ -1,23 +1,33 @@
 import { Injectable } from '@nestjs/common';
-import { ITranslationProvider } from '../interfaces/translation-provider.interface';
+import {
+  ITranslationProvider,
+  TranslationChunkRequest,
+  TranslationChunkResult,
+} from '../interfaces/translation-provider.interface';
 
 @Injectable()
 export class FakeTranslationProvider implements ITranslationProvider {
-  async translate(
-    text: string,
-    _sourceLang: string,
-    _targetLang: string,
-  ): Promise<string> {
-    return `[VI] ${text}`;
-  }
+  async translateChunk(
+    input: TranslationChunkRequest,
+  ): Promise<TranslationChunkResult> {
+    const paragraphs = input.paragraphs.map((paragraph) => ({
+      id: paragraph.id,
+      text: `[VI] ${paragraph.text}`,
+    }));
 
-  async translateBatch(
-    texts: string[],
-    sourceLang: string,
-    targetLang: string,
-  ): Promise<string[]> {
-    return Promise.all(
-      texts.map((t) => this.translate(t, sourceLang, targetLang)),
-    );
+    return {
+      paragraphs,
+      rawText: JSON.stringify({ paragraphs }),
+      model: 'fake-translation-provider',
+      inputTokens: input.paragraphs.reduce(
+        (total, paragraph) => total + paragraph.text.length,
+        0,
+      ),
+      outputTokens: paragraphs.reduce(
+        (total, paragraph) => total + paragraph.text.length,
+        0,
+      ),
+      finishReason: 'stop',
+    };
   }
 }

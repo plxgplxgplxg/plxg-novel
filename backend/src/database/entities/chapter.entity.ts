@@ -12,6 +12,7 @@ import {
 } from 'typeorm';
 import { Book } from './book.entity';
 import { Segment } from './segment.entity';
+import { ChapterChunk } from './chapter-chunk.entity';
 
 export enum ChapterStatus {
   PENDING = 'pending',
@@ -59,6 +60,9 @@ export class Chapter {
   @Column({ default: 1 })
   mergeVersion: number;
 
+  @Column({ default: 1 })
+  translationRevision: number;
+
   @Column({ type: 'varchar', nullable: true })
   segmentsHash: string | null;
 
@@ -98,4 +102,7 @@ export class Chapter {
 
   @OneToMany(() => Segment, (segment) => segment.chapter)
   segments: Segment[];
+
+  @OneToMany(() => ChapterChunk, (chunk) => chunk.chapter)
+  chunks: ChapterChunk[];
 }

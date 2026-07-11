@@ -6,6 +6,12 @@ import { Queue } from 'bullmq';
 import { NovelCacheService } from '../../cache/novel-cache.service';
 import { Segment, SegmentStatus } from '../../database/entities/segment.entity';
 import { Chapter, ChapterStatus } from '../../database/entities/chapter.entity';
+import { ChapterChunk } from '../../database/entities/chapter-chunk.entity';
+import {
+  TranslationJob,
+  JobStatus,
+  JobType,
+} from '../../database/entities/translation-job.entity';
 import {
   QUEUE_TRANSLATION,
   BULLMQ_BACKOFF_CONFIG,
@@ -19,6 +25,10 @@ export class SegmentService {
     private readonly segmentRepo: Repository<Segment>,
     @InjectRepository(Chapter)
     private readonly chapterRepo: Repository<Chapter>,
+    @InjectRepository(ChapterChunk)
+    private readonly chunkRepo: Repository<ChapterChunk>,
+    @InjectRepository(TranslationJob)
+    private readonly jobRepo: Repository<TranslationJob>,
     @InjectQueue(QUEUE_TRANSLATION)
     private readonly translationQueue: Queue,
     private readonly novelCacheService: NovelCacheService,
@@ -39,17 +49,22 @@ export class SegmentService {
       retryCount: 0,
       errorMessage: undefined,
     });
+    await this.chunkRepo.delete({ chapterId: segment.chapterId });
+    await this.jobRepo.delete({ chapterId: segment.chapterId });
     await this.chapterRepo
       .createQueryBuilder()
       .update(Chapter)
       .set({
-        status: ChapterStatus.TRANSLATING,
+        status: ChapterStatus.PENDING,
         mergedContent: null,
         mergedAt: null,
         segmentsHash: null,
         mergedMetadata: null,
         mergeVersion: () => '"mergeVersion" + 1',
-        completedSegments: () => 'GREATEST("completedSegments" - 1, 0)',
+        translationRevision: () => '"translationRevision" + 1',
+        totalSegments: 0,
+        completedSegments: 0,
+        translatedContent: '',
       })
       .where('id = :id', { id: segment.chapterId })
       .execute();
@@ -58,11 +73,53 @@ export class SegmentService {
       segment.chapterId,
     );
 
+    const refreshedChapter = await this.chapterRepo.findOne({
+      where: { id: segment.chapterId },
+    });
+
+    if (!refreshedChapter) {
+      throw new NotFoundException('Chapter not found');
+    }
+
+    const bookJob = await this.jobRepo.save(
+      this.jobRepo.create({
+        bookId: segment.chapter.bookId,
+        jobType: JobType.TRANSLATE_BOOK,
+        status: JobStatus.QUEUED,
+        translationRevision: refreshedChapter.translationRevision,
+      }),
+    );
+    const chapterJob = await this.jobRepo.save(
+      this.jobRepo.create({
+        bookId: segment.chapter.bookId,
+        chapterId: refreshedChapter.id,
+        jobType: JobType.TRANSLATE_CHAPTER,
+        status: JobStatus.QUEUED,
+        translationRevision: refreshedChapter.translationRevision,
+      }),
+    );
+    const bullmqJobId = `translate-chapter:${refreshedChapter.id}:${refreshedChapter.translationRevision}`;
+
     await this.translationQueue.add(
       'translate-chapter',
-      { chapterId: segment.chapterId },
-      { attempts: MAX_RETRY_ATTEMPTS, backoff: BULLMQ_BACKOFF_CONFIG },
+      {
+        chapterId: refreshedChapter.id,
+        bookJobId: bookJob.id,
+        chapterJobId: chapterJob.id,
+        translationRevision: refreshedChapter.translationRevision,
+        enqueueFollowingChapters: false,
+      },
+      {
+        jobId: bullmqJobId,
+        attempts: MAX_RETRY_ATTEMPTS,
+        backoff: BULLMQ_BACKOFF_CONFIG,
+        removeOnComplete: true,
+        removeOnFail: true,
+      },
     );
+    await this.jobRepo.update(chapterJob.id, {
+      bullmqJobId,
+    });
 
     return { queued: true };
   }

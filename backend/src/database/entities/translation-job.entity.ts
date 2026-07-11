@@ -57,8 +57,14 @@ export class TranslationJob {
   @Column({ nullable: true })
   bullmqJobId: string;
 
+  @Column({ default: 1, name: 'translation_revision' })
+  translationRevision: number;
+
+  @Column({ nullable: true, name: 'error_code' })
+  errorCode: string | null;
+
   @Column({ nullable: true })
-  errorMessage: string;
+  errorMessage: string | null;
 
   @CreateDateColumn()
   createdAt: Date;

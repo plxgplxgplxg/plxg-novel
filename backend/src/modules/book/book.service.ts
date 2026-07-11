@@ -23,7 +23,7 @@ import {
 } from '../../database/entities/translation-job.entity';
 import { CreateBookDto } from './dto/create-book.dto';
 import {
-  QUEUE_CHAPTER_SPLIT,
+  QUEUE_TRANSLATION,
   BULLMQ_BACKOFF_CONFIG,
   MAX_RETRY_ATTEMPTS,
 } from '../../queue/queue.constants';
@@ -128,8 +128,8 @@ export class BookService {
     private readonly chapterRepo: Repository<Chapter>,
     @InjectRepository(TranslationJob)
     private readonly jobRepo: Repository<TranslationJob>,
-    @InjectQueue(QUEUE_CHAPTER_SPLIT)
-    private readonly splitQueue: Queue,
+    @InjectQueue(QUEUE_TRANSLATION)
+    private readonly translationQueue: Queue,
     private readonly redisCacheService: RedisCacheService,
     private readonly novelCacheService: NovelCacheService,
   ) {}
@@ -386,46 +386,61 @@ export class BookService {
     bookId: string,
     chapters: Chapter[],
   ): Promise<{ jobId: string }> {
+    const orderedChapters = [...chapters].sort(
+      (left, right) =>
+        left.chapterNumber - right.chapterNumber ||
+        left.createdAt.getTime() - right.createdAt.getTime(),
+    );
+    const firstChapter = orderedChapters[0];
+
+    if (!firstChapter) {
+      throw new BadRequestException('No chapters to translate');
+    }
+
     const bookJob = await this.jobRepo.save(
       this.jobRepo.create({
         bookId,
         jobType: JobType.TRANSLATE_BOOK,
         status: JobStatus.QUEUED,
+        translationRevision: firstChapter.translationRevision,
       }),
     );
 
-    const chapterJobs = await this.jobRepo.save(
-      chapters.map((chapter) =>
-        this.jobRepo.create({
-          bookId,
-          chapterId: chapter.id,
-          jobType: JobType.TRANSLATE_CHAPTER,
-          status: JobStatus.QUEUED,
-        }),
-      ),
-    );
-
-    const chapterJobByChapterId = new Map(
-      chapterJobs.map((job) => [job.chapterId, job.id]),
+    const chapterJob = await this.jobRepo.save(
+      this.jobRepo.create({
+        bookId,
+        chapterId: firstChapter.id,
+        jobType: JobType.TRANSLATE_CHAPTER,
+        status: JobStatus.QUEUED,
+        translationRevision: firstChapter.translationRevision,
+      }),
     );
 
     await this.bookRepo.update(bookId, { status: BookStatus.PROCESSING });
     await this.novelCacheService.invalidateBookAndChapterCaches(bookId);
 
-    await this.splitQueue.addBulk(
-      chapters.map((chapter) => ({
-        name: 'split-chapter',
-        data: {
-          chapterId: chapter.id,
-          bookJobId: bookJob.id,
-          chapterJobId: chapterJobByChapterId.get(chapter.id),
-        },
-        opts: {
-          attempts: MAX_RETRY_ATTEMPTS,
-          backoff: BULLMQ_BACKOFF_CONFIG,
-        },
-      })),
+    const bullmqJobId = `translate-chapter:${firstChapter.id}:${firstChapter.translationRevision}`;
+    await this.translationQueue.add(
+      'translate-chapter',
+      {
+        chapterId: firstChapter.id,
+        bookJobId: bookJob.id,
+        chapterJobId: chapterJob.id,
+        translationRevision: firstChapter.translationRevision,
+        enqueueFollowingChapters: true,
+      },
+      {
+        jobId: bullmqJobId,
+        attempts: MAX_RETRY_ATTEMPTS,
+        backoff: BULLMQ_BACKOFF_CONFIG,
+        removeOnComplete: true,
+        removeOnFail: true,
+      },
     );
+
+    await this.jobRepo.update(chapterJob.id, {
+      bullmqJobId,
+    });
 
     return { jobId: bookJob.id };
   }

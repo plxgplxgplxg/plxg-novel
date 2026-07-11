@@ -1,5 +1,5 @@
 export const QUEUE_CHAPTER_SPLIT = 'chapter-split-queue';
-export const QUEUE_TRANSLATION = 'translation-queue';
+export const QUEUE_TRANSLATION = 'chapter-translation-queue';
 export const QUEUE_CHAPTER_MERGE = 'chapter-merge-queue';
 export const QUEUE_CHAPTER_RAW_CACHE = 'chapter-raw-cache-queue';
 
@@ -17,6 +17,6 @@ export const BULLMQ_COLD_START_BACKOFF = {
   delay: 10000,
 };
 
-export const TRANSLATION_WORKER_CONCURRENCY = 2;
+export const TRANSLATION_WORKER_CONCURRENCY = 4;
 export const SPLIT_WORKER_CONCURRENCY = 1;
 export const MERGE_WORKER_CONCURRENCY = 2;

@@ -25,6 +25,7 @@ describe('ChapterService', () => {
       mergedContent: 'merged body',
       mergedAt: new Date('2026-01-01T00:00:00.000Z'),
       mergeVersion: 3,
+      translationRevision: 1,
       segmentsHash: 'hash',
       mergedMetadata: {
         failedSegmentCount: 1,
@@ -46,6 +47,7 @@ describe('ChapterService', () => {
     const chapterRepo = {
       createQueryBuilder: jest.fn().mockReturnValue(chapterQueryBuilder),
     };
+    const chunkRepo = { find: jest.fn().mockResolvedValue([]) };
     const segmentRepo = { find: jest.fn() };
     const redisCacheService = { get: jest.fn().mockResolvedValue(null), set: jest.fn() };
     const novelCacheService = {
@@ -57,6 +59,7 @@ describe('ChapterService', () => {
     const service = new ChapterService(
       chapterRepo as never,
       segmentRepo as never,
+      chunkRepo as never,
       {} as never,
       {} as never,
       {} as never,
@@ -90,6 +93,7 @@ describe('ChapterService', () => {
       mergedContent: null,
       mergedAt: null,
       mergeVersion: 2,
+      translationRevision: 1,
       segmentsHash: null,
       mergedMetadata: null,
       sourceFileName: 'chapter.txt',
@@ -101,6 +105,7 @@ describe('ChapterService', () => {
     const chapterRepo = {
       createQueryBuilder: jest.fn().mockReturnValue(chapterQueryBuilder),
     };
+    const chunkRepo = { find: jest.fn().mockResolvedValue([]) };
     const segmentRepo = {
       find: jest.fn().mockResolvedValue([
         {
@@ -139,6 +144,7 @@ describe('ChapterService', () => {
     const service = new ChapterService(
       chapterRepo as never,
       segmentRepo as never,
+      chunkRepo as never,
       {} as never,
       {} as never,
       {} as never,
@@ -184,6 +190,7 @@ describe('ChapterService', () => {
       mergedContent: null,
       mergedAt: null,
       mergeVersion: 2,
+      translationRevision: 1,
       segmentsHash: null,
       mergedMetadata: null,
       sourceFileName: 'chapter.txt',
@@ -195,6 +202,7 @@ describe('ChapterService', () => {
     const chapterRepo = {
       createQueryBuilder: jest.fn().mockReturnValue(chapterQueryBuilder),
     };
+    const chunkRepo = { find: jest.fn().mockResolvedValue([]) };
     const segmentRepo = {
       find: jest.fn().mockResolvedValue([
         {
@@ -214,6 +222,7 @@ describe('ChapterService', () => {
     const service = new ChapterService(
       chapterRepo as never,
       segmentRepo as never,
+      chunkRepo as never,
       {} as never,
       {} as never,
       {} as never,
@@ -248,6 +257,7 @@ describe('ChapterService', () => {
       mergedContent: 'merged body',
       mergedAt: new Date('2026-01-01T00:00:00.000Z'),
       mergeVersion: 3,
+      translationRevision: 1,
       segmentsHash: 'hash',
       mergedMetadata: {
         failedSegmentCount: 0,
@@ -263,6 +273,7 @@ describe('ChapterService', () => {
     const chapterRepo = {
       createQueryBuilder: jest.fn().mockReturnValue(chapterQueryBuilder),
     };
+    const chunkRepo = { find: jest.fn().mockResolvedValue([]) };
     const segmentRepo = {
       find: jest.fn().mockResolvedValue([
         {
@@ -290,6 +301,7 @@ describe('ChapterService', () => {
     const service = new ChapterService(
       chapterRepo as never,
       segmentRepo as never,
+      chunkRepo as never,
       {} as never,
       {} as never,
       {} as never,
