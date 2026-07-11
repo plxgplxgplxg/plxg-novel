@@ -359,13 +359,17 @@ export class TranslationWorker extends WorkerHost {
         error instanceof TranslationProviderError
           ? error.message
           : String(error);
+      const errorCode = this.classifyChunkError(message);
 
       await this.chunkRepo.update(chunk.id, {
         status: ChapterChunkStatus.FAILED,
-        errorCode: this.classifyChunkError(message),
+        errorCode,
         errorMessage: message,
         finishedAt: new Date(),
       });
+      this.logger.warn(
+        `Chunk translation failed chapterId=${chapter.id} chunkId=${chunk.id} revision=${chapter.translationRevision} chunkIndex=${chunk.chunkIndex} attemptCount=${chunk.attemptCount + 1} errorCode=${errorCode} errorMessage=${this.truncateLogMessage(message)}`,
+      );
       await this.flushChunkProgress(
         chapter,
         chapter.translationRevision,
@@ -557,6 +561,18 @@ export class TranslationWorker extends WorkerHost {
     const completedCount = chunks.filter(
       (chunk) => chunk.status === ChapterChunkStatus.DONE,
     ).length;
+    const failedChunkSummary = chunks
+      .filter((chunk) => chunk.status === ChapterChunkStatus.FAILED)
+      .slice(0, 5)
+      .map(
+        (chunk) =>
+          `chunkIndex=${chunk.chunkIndex} errorCode=${chunk.errorCode ?? 'unknown'} errorMessage=${this.truncateLogMessage(chunk.errorMessage ?? 'unknown', 180)}`,
+      )
+      .join(' | ');
+
+    this.logger.warn(
+      `Chapter translation failed chapterId=${chapter.id} bookId=${chapter.bookId} revision=${chapter.translationRevision} errorCode=${errorCode} errorMessage=${this.truncateLogMessage(errorMessage)} completed=${completedCount}/${chunks.length} failed=${failedChunks.length} failedChunks=${failedChunkSummary || 'none'}`,
+    );
 
     await this.chapterRepo.update(chapter.id, {
       status: ChapterStatus.FAILED,
@@ -1024,6 +1040,16 @@ export class TranslationWorker extends WorkerHost {
     }
 
     return 'TRANSLATION_ERROR';
+  }
+
+  private truncateLogMessage(message: string, maxLength = 300): string {
+    const singleLine = message.replace(/\s+/g, ' ').trim();
+
+    if (singleLine.length <= maxLength) {
+      return singleLine;
+    }
+
+    return `${singleLine.substring(0, maxLength)}...`;
   }
 
   private async markChunkRevisionStale(

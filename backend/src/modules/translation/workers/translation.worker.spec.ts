@@ -3,6 +3,7 @@ import { ChapterStatus } from '../../../database/entities/chapter.entity';
 import { ChapterChunkStatus } from '../../../database/entities/chapter-chunk.entity';
 import { JobStatus } from '../../../database/entities/translation-job.entity';
 import { TranslationWorker } from './translation.worker';
+import { TranslationProviderError } from '../interfaces/translation-errors';
 
 function createWorker(overrides: {
   chapterRepo?: Record<string, unknown>;
@@ -238,5 +239,93 @@ describe('TranslationWorker', () => {
 
     expect(chunkRepo.update).not.toHaveBeenCalled();
     expect(translationProvider.translateChunk).not.toHaveBeenCalled();
+  });
+
+  it('logs chunk failure details when provider output is invalid', async () => {
+    const chapter = {
+      id: 'chapter-1',
+      bookId: 'book-1',
+      translationRevision: 1,
+    };
+    const chunk = {
+      id: 'chunk-1',
+      chapterId: 'chapter-1',
+      translationRevision: 1,
+      chunkIndex: 2,
+      status: ChapterChunkStatus.PENDING,
+      attemptCount: 1,
+      sourceText: '第一段',
+      contextBefore: null,
+      paragraphIds: ['p1'],
+    };
+    const progressQuery = {
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue(undefined),
+    };
+    const jobUpdateQuery = {
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue(undefined),
+    };
+    const chunkRepo = {
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+      find: jest.fn().mockResolvedValue([
+        {
+          ...chunk,
+          status: ChapterChunkStatus.FAILED,
+          errorCode: 'INVALID_OUTPUT',
+          errorMessage: 'INVALID_PARAGRAPH_ORDER',
+        },
+      ]),
+    };
+    const worker = createWorker({
+      chapterRepo: {
+        createQueryBuilder: jest.fn().mockReturnValue(progressQuery),
+      },
+      chunkRepo,
+      jobRepo: {
+        findOne: jest.fn().mockResolvedValue({ status: JobStatus.RUNNING }),
+        createQueryBuilder: jest.fn().mockReturnValue(jobUpdateQuery),
+      },
+      translationProvider: {
+        translateChunk: jest
+          .fn()
+          .mockRejectedValue(
+            new TranslationProviderError('INVALID_PARAGRAPH_ORDER'),
+          ),
+      },
+      eventEmitter: { emit: jest.fn() },
+      novelCacheService: {
+        invalidateChapterRead: jest.fn().mockResolvedValue(undefined),
+      },
+      concurrencyGate: {
+        run: jest.fn((task: () => Promise<unknown>) => task()),
+      },
+    });
+    const warnSpy = jest
+      .spyOn((worker as never as { logger: { warn: Function } }).logger, 'warn')
+      .mockImplementation();
+
+    await (worker as never as { processChunk: Function }).processChunk(
+      chapter,
+      chunk,
+      'chapter-job-1',
+    );
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Chunk translation failed chapterId=chapter-1 chunkId=chunk-1',
+      ),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('errorCode=INVALID_OUTPUT'),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('errorMessage=INVALID_PARAGRAPH_ORDER'),
+    );
   });
 });
