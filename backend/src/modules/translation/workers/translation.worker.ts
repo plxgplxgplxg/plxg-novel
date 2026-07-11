@@ -113,6 +113,13 @@ export class TranslationWorker extends WorkerHost {
       return;
     }
 
+    if (!(await this.isTranslationFlowActive(job.data))) {
+      this.logger.debug(
+        `Skip inactive translation flow chapterId=${chapter.id} chapterJobId=${job.data.chapterJobId ?? 'none'} bookJobId=${job.data.bookJobId ?? 'none'}`,
+      );
+      return;
+    }
+
     await this.delayUntilPreviousChaptersComplete(job, chapter);
 
     await this.ensureChapterJobsRunning(
@@ -142,6 +149,13 @@ export class TranslationWorker extends WorkerHost {
       index < unfinishedChunks.length;
       index += TRANSLATION_WORKER_CONCURRENCY
     ) {
+      if (!(await this.isTranslationFlowActive(job.data))) {
+        this.logger.debug(
+          `Stop inactive translation flow before batch chapterId=${chapter.id}`,
+        );
+        return;
+      }
+
       const batch = unfinishedChunks.slice(
         index,
         index + TRANSLATION_WORKER_CONCURRENCY,
@@ -260,6 +274,13 @@ export class TranslationWorker extends WorkerHost {
       return;
     }
 
+    if (!(await this.isTranslationJobActive(chapterJobId))) {
+      this.logger.debug(
+        `Skip chunk provider call for inactive chapter job chapterId=${chapter.id} chunkId=${chunk.id}`,
+      );
+      return;
+    }
+
     const claimResult = await this.chunkRepo.update(
       {
         id: chunk.id,
@@ -296,6 +317,13 @@ export class TranslationWorker extends WorkerHost {
     };
 
     try {
+      if (!(await this.isTranslationJobActive(chapterJobId))) {
+        this.logger.debug(
+          `Skip claimed chunk provider call for inactive chapter job chapterId=${chapter.id} chunkId=${chunk.id}`,
+        );
+        return;
+      }
+
       const result = await this.concurrencyGate.run(() =>
         this.translationProvider.translateChunk(request),
       );
@@ -567,7 +595,124 @@ export class TranslationWorker extends WorkerHost {
       false,
       true,
     );
+    await this.abortBookTranslationFlow(
+      chapter.bookId,
+      chapterJobId,
+      bookJobId,
+      errorCode,
+      errorMessage,
+    );
     await this.updateBookState(chapter.bookId, bookJobId, false);
+  }
+
+  private async isTranslationFlowActive(
+    jobData: TranslationJobPayload,
+  ): Promise<boolean> {
+    const [bookJobActive, chapterJobActive] = await Promise.all([
+      this.isTranslationJobActive(jobData.bookJobId),
+      this.isTranslationJobActive(jobData.chapterJobId),
+    ]);
+
+    return bookJobActive && chapterJobActive;
+  }
+
+  private async isTranslationJobActive(jobId: string | undefined): Promise<boolean> {
+    if (!jobId) {
+      return true;
+    }
+
+    const job = await this.jobRepo.findOne({
+      where: { id: jobId },
+    });
+
+    return (
+      !job ||
+      job.status === JobStatus.QUEUED ||
+      job.status === JobStatus.RUNNING
+    );
+  }
+
+  private async abortBookTranslationFlow(
+    bookId: string,
+    currentChapterJobId: string | undefined,
+    bookJobId: string | undefined,
+    errorCode: string,
+    errorMessage: string,
+  ): Promise<void> {
+    await this.failPendingTranslationJobs(
+      bookId,
+      currentChapterJobId,
+      bookJobId,
+      errorCode,
+      errorMessage,
+    );
+    await this.removePendingBullmqTranslationJobs(bookId);
+  }
+
+  private async failPendingTranslationJobs(
+    bookId: string,
+    currentChapterJobId: string | undefined,
+    bookJobId: string | undefined,
+    errorCode: string,
+    errorMessage: string,
+  ): Promise<void> {
+    await this.jobRepo
+      .createQueryBuilder()
+      .update(TranslationJob)
+      .set({
+        status: JobStatus.FAILED,
+        errorCode,
+        errorMessage,
+      })
+      .where('book_id = :bookId', { bookId })
+      .andWhere('status IN (:...statuses)', {
+        statuses: [JobStatus.QUEUED, JobStatus.RUNNING],
+      })
+      .andWhere('id != :currentChapterJobId', {
+        currentChapterJobId: currentChapterJobId ?? '',
+      })
+      .execute();
+
+    if (bookJobId) {
+      await this.jobRepo.update(bookJobId, {
+        status: JobStatus.FAILED,
+        errorCode,
+        errorMessage,
+      });
+    }
+  }
+
+  private async removePendingBullmqTranslationJobs(bookId: string): Promise<void> {
+    const bookChapters = await this.chapterRepo.find({
+      where: { bookId },
+      select: { id: true },
+    });
+    const bookChapterIds = new Set(bookChapters.map((chapter) => chapter.id));
+    const pendingJobs = await this.translationQueue.getJobs(
+      ['waiting', 'delayed', 'prioritized', 'paused'],
+      0,
+      -1,
+      true,
+    );
+
+    await Promise.all(
+      pendingJobs
+        .filter((pendingJob) =>
+          bookChapterIds.has(
+            (pendingJob.data as TranslationJobPayload | undefined)
+              ?.chapterId ?? '',
+          ),
+        )
+        .map(async (pendingJob) => {
+          try {
+            await pendingJob.remove();
+          } catch (error) {
+            this.logger.warn(
+              `Failed to remove pending translation queue job id=${pendingJob.id ?? 'unknown'} error=${String(error)}`,
+            );
+          }
+        }),
+    );
   }
 
   private async ensureChapterJobsRunning(
@@ -776,11 +921,14 @@ export class TranslationWorker extends WorkerHost {
 
     if (bookJobId) {
       await this.jobRepo.update(bookJobId, {
-        status: anyActive
-          ? JobStatus.RUNNING
-          : status === BookStatus.FAILED
+        status:
+          !enqueueFollowingChapters && anyFailed
             ? JobStatus.FAILED
-            : JobStatus.COMPLETED,
+            : anyActive
+              ? JobStatus.RUNNING
+              : status === BookStatus.FAILED
+                ? JobStatus.FAILED
+                : JobStatus.COMPLETED,
         progressPercent: allDone || !anyActive ? 100 : 0,
       });
     }

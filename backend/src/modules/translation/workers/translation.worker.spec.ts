@@ -84,6 +84,7 @@ describe('TranslationWorker', () => {
     };
     const jobRepo = {
       createQueryBuilder: jest.fn().mockReturnValue(jobUpdateQuery),
+      findOne: jest.fn().mockResolvedValue({ status: JobStatus.RUNNING }),
     };
     const translationProvider = {
       translateChunk: jest.fn().mockResolvedValue({
@@ -161,7 +162,7 @@ describe('TranslationWorker', () => {
     const worker = createWorker({
       chapterRepo,
       chunkRepo: {},
-      jobRepo: {},
+      jobRepo: { findOne: jest.fn().mockResolvedValue(null) },
       translationProvider: {},
       eventEmitter: {},
       novelCacheService: {},
@@ -190,5 +191,52 @@ describe('TranslationWorker', () => {
       'token-1',
     );
     expect(chapterRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('skips provider calls when a chapter job is no longer active', async () => {
+    const chapter = {
+      id: 'chapter-1',
+      bookId: 'book-1',
+      translationRevision: 1,
+    };
+    const chunk = {
+      id: 'chunk-1',
+      chapterId: 'chapter-1',
+      translationRevision: 1,
+      chunkIndex: 0,
+      status: ChapterChunkStatus.PENDING,
+      attemptCount: 0,
+      sourceText: '第一段',
+      contextBefore: null,
+      paragraphIds: ['p1'],
+    };
+    const chunkRepo = {
+      update: jest.fn(),
+    };
+    const translationProvider = {
+      translateChunk: jest.fn(),
+    };
+    const worker = createWorker({
+      chapterRepo: {},
+      chunkRepo,
+      jobRepo: {
+        findOne: jest.fn().mockResolvedValue({ status: JobStatus.FAILED }),
+      },
+      translationProvider,
+      eventEmitter: {},
+      novelCacheService: {},
+      concurrencyGate: {
+        run: jest.fn(),
+      },
+    });
+
+    await (worker as never as { processChunk: Function }).processChunk(
+      chapter,
+      chunk,
+      'chapter-job-1',
+    );
+
+    expect(chunkRepo.update).not.toHaveBeenCalled();
+    expect(translationProvider.translateChunk).not.toHaveBeenCalled();
   });
 });
