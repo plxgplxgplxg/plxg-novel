@@ -74,7 +74,7 @@ export class ChapterChunk {
   @Column({ name: 'attempt_count', default: 0 })
   attemptCount: number;
 
-  @Column({ name: 'error_code', nullable: true })
+  @Column({ name: 'error_code', type: 'varchar', nullable: true })
   errorCode: string | null;
 
   @Column({ name: 'error_message', type: 'text', nullable: true })
@@ -86,7 +86,7 @@ export class ChapterChunk {
   @Column({ name: 'glossary_version', default: 1 })
   glossaryVersion: number;
 
-  @Column({ name: 'provider_model', nullable: true })
+  @Column({ name: 'provider_model', type: 'varchar', nullable: true })
   providerModel: string | null;
 
   @Column({ name: 'input_tokens', default: 0 })
