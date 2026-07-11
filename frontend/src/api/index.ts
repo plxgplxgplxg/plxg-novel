@@ -138,3 +138,10 @@ export const fetchChapter = async (chapterId: string): Promise<ChapterDetail> =>
   const res = await apiClient.get(`/chapters/${chapterId}`);
   return res.data;
 };
+
+export const retranslateChapter = async (chapterId: string, retryFailedOnly: boolean = false) => {
+  const res = await apiClient.post(`/chapters/${chapterId}/translate`, null, {
+    params: { retryFailedOnly }
+  });
+  return res.data;
+};

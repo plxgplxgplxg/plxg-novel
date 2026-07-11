@@ -447,28 +447,36 @@ export class ChapterService {
   async retranslateChapter(
     id: string,
     userId: string,
+    retryFailedOnly: boolean = false,
   ): Promise<{ jobId: string }> {
     const chapter = await this.findChapterForOwner(id, userId);
-    await this.chunkRepo.delete({ chapterId: id });
-    await this.segmentRepo.delete({ chapterId: id });
-    await this.jobRepo.delete({ chapterId: id });
-    await this.chapterRepo
-      .createQueryBuilder()
-      .update(Chapter)
-      .set({
+
+    if (!retryFailedOnly) {
+      await this.chunkRepo.delete({ chapterId: id });
+      await this.segmentRepo.delete({ chapterId: id });
+      await this.jobRepo.delete({ chapterId: id });
+      await this.chapterRepo
+        .createQueryBuilder()
+        .update(Chapter)
+        .set({
+          status: ChapterStatus.PENDING,
+          totalSegments: 0,
+          completedSegments: 0,
+          translatedContent: '',
+          mergedContent: null,
+          mergedAt: null,
+          segmentsHash: null,
+          mergedMetadata: null,
+          mergeVersion: () => '"mergeVersion" + 1',
+          translationRevision: () => '"translationRevision" + 1',
+        })
+        .where('id = :id', { id })
+        .execute();
+    } else {
+      await this.chapterRepo.update(id, {
         status: ChapterStatus.PENDING,
-        totalSegments: 0,
-        completedSegments: 0,
-        translatedContent: '',
-        mergedContent: null,
-        mergedAt: null,
-        segmentsHash: null,
-        mergedMetadata: null,
-        mergeVersion: () => '"mergeVersion" + 1',
-        translationRevision: () => '"translationRevision" + 1',
-      })
-      .where('id = :id', { id })
-      .execute();
+      });
+    }
 
     await this.novelCacheService.invalidateBookAndChapterCaches(chapter.bookId, id);
 

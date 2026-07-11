@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { createBookProgressStreamUrl, fetchBookDetails, fetchChapter } from '../api';
-import { ChevronLeft, ChevronRight, List, LibraryBig } from 'lucide-react';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { createBookProgressStreamUrl, fetchBookDetails, fetchChapter, retranslateChapter } from '../api';
+import { ChevronLeft, ChevronRight, List, LibraryBig, RefreshCw } from 'lucide-react';
 
 const isChapterReadable = (chapter?: {
   totalSegments: number;
@@ -11,13 +11,21 @@ const isChapterReadable = (chapter?: {
   Boolean(
     chapter &&
       chapter.totalSegments > 0 &&
-      chapter.completedSegments >= chapter.totalSegments,
+      chapter.completedSegments > 0,
   );
 
 const ReaderPage = () => {
   const { bookId, chapterId } = useParams<{ bookId: string; chapterId: string }>();
   const queryClient = useQueryClient();
   const [viewMode, setViewMode] = useState<'translation' | 'raw'>('translation');
+
+  const retranslateMutation = useMutation({
+    mutationFn: (retryFailedOnly?: boolean) => retranslateChapter(chapterId!, retryFailedOnly),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['chapter', chapterId] });
+      queryClient.invalidateQueries({ queryKey: ['book', bookId] });
+    },
+  });
 
   const { data: book, isLoading: isBookLoading } = useQuery({
     queryKey: ['book', bookId],
@@ -145,9 +153,31 @@ const ReaderPage = () => {
           <h1>{book.title}</h1>
           <p>{currentChapter.chapterNumber ? `Chương ${currentChapter.chapterNumber}` : ''}</p>
         </div>
-        <div className="reader-index-pill">
-          <LibraryBig size={16} />
-          <span>{currentChapterIdx >= 0 ? currentChapterIdx + 1 : '?'} / {book.chapters.length}</span>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          {currentChapter.failedSegmentCount ? (
+            <button 
+               className="btn" 
+               onClick={() => retranslateMutation.mutate(true)} 
+               disabled={retranslateMutation.isPending}
+               style={{ padding: '0.25rem 0.75rem', fontSize: '0.875rem', backgroundColor: 'var(--error)' }}
+            >
+               <RefreshCw size={14} className={retranslateMutation.isPending ? 'spin' : ''} />
+               {retranslateMutation.isPending ? 'Đang yêu cầu...' : 'Dịch lại đoạn lỗi'}
+            </button>
+          ) : null}
+          <button 
+             className="btn btn-secondary" 
+             onClick={() => retranslateMutation.mutate(false)} 
+             disabled={retranslateMutation.isPending}
+             style={{ padding: '0.25rem 0.75rem', fontSize: '0.875rem' }}
+          >
+             <RefreshCw size={14} className={retranslateMutation.isPending ? 'spin' : ''} />
+             {retranslateMutation.isPending ? 'Đang yêu cầu...' : 'Dịch lại'}
+          </button>
+          <div className="reader-index-pill">
+            <LibraryBig size={16} />
+            <span>{currentChapterIdx >= 0 ? currentChapterIdx + 1 : '?'} / {book.chapters.length}</span>
+          </div>
         </div>
       </div>
 

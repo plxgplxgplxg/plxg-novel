@@ -128,7 +128,15 @@ export class ChapterController {
   @Post('chapters/:id/translate')
   @UseGuards(AuthGuard('jwt'))
   @HttpCode(HttpStatus.ACCEPTED)
-  retranslate(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.chapterService.retranslateChapter(id, user.sub);
+  retranslate(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Query('retryFailedOnly') retryFailedOnly?: string,
+  ) {
+    return this.chapterService.retranslateChapter(
+      id,
+      user.sub,
+      retryFailedOnly === 'true',
+    );
   }
 }

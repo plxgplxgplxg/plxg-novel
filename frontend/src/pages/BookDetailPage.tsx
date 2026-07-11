@@ -27,7 +27,7 @@ const isChapterReadable = (chapter: {
   hasReadableContent?: boolean;
 }) =>
   chapter.totalSegments > 0 &&
-  chapter.completedSegments >= chapter.totalSegments;
+  chapter.completedSegments > 0;
 
 const BookDetailPage = () => {
   const { bookId } = useParams<{ bookId: string }>();
