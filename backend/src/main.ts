@@ -9,7 +9,9 @@ async function bootstrap() {
 
   // Log incoming HTTP requests
   app.use((req: any, res: any, next: any) => {
-    console.log(`[HTTP] ${req.method} ${req.url}`);
+    res.on('finish', () => {
+      console.log(`[HTTP] ${req.method} ${req.url} - ${res.statusCode}`);
+    });
     next();
   });
 

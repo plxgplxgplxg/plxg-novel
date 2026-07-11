@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ITranslationProvider,
@@ -16,6 +16,8 @@ const DEFAULT_MODEL = 'configured-literary-translation-model';
 
 @Injectable()
 export class HFInferenceProvider implements ITranslationProvider {
+  private readonly logger = new Logger(HFInferenceProvider.name);
+
   constructor(private readonly configService: ConfigService) {}
 
   private getEndpoint(): string {
@@ -26,7 +28,10 @@ export class HFInferenceProvider implements ITranslationProvider {
     input: TranslationChunkRequest,
   ): Promise<TranslationChunkResult> {
     const token = this.configService.get<string>('HF_TOKEN');
-    const res = await fetch(this.getEndpoint(), {
+    const endpoint = this.getEndpoint();
+    this.logger.log(`Calling AI Provider at ${endpoint} for request ${input.requestId || 'unknown'}`);
+
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -53,6 +58,8 @@ export class HFInferenceProvider implements ITranslationProvider {
         ],
       }),
     });
+
+    this.logger.log(`AI Provider returned status: ${res.status}`);
 
     if (res.status === 503) throw new ProviderColdStartError();
     if (!res.ok) throw new TranslationProviderError(await res.text());
