@@ -61,8 +61,11 @@ export class HFInferenceProvider implements ITranslationProvider {
 
     this.logger.log(`AI Provider returned status: ${res.status}`);
 
-    if (res.status === 503) throw new ProviderColdStartError();
-    if (!res.ok) throw new TranslationProviderError(await res.text());
+    if (!res.ok) {
+      const errorText = await res.text();
+      this.logger.error(`AI Provider error response: ${errorText}`);
+      throw new TranslationProviderError(errorText);
+    }
 
     const data = (await res.json()) as {
       model?: string;
