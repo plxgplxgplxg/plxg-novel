@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { createBookProgressStreamUrl, fetchBookDetails } from '../api';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { createBookProgressStreamUrl, fetchBookDetails, retranslateChapter } from '../api';
 import { ChevronLeft, BookOpen, ListOrdered, ScrollText } from 'lucide-react';
 
 const STATUS_LABELS = {
@@ -39,6 +39,14 @@ const BookDetailPage = () => {
     enabled: !!bookId,
     staleTime: 5 * 60_000,
     gcTime: 15 * 60_000,
+  });
+
+  const retranslateMutation = useMutation({
+    mutationFn: ({ chapterId, retryFailedOnly }: { chapterId: string, retryFailedOnly: boolean }) => 
+      retranslateChapter(chapterId, retryFailedOnly),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['book', bookId] });
+    },
   });
 
   useEffect(() => {
@@ -181,15 +189,39 @@ const BookDetailPage = () => {
                   </div>
                 </div>
 
-                {canRead ? (
-                  <Link to={`/books/${book.id}/chapters/${chapter.id}`} className="btn">
-                    <BookOpen size={16} /> Đọc
-                  </Link>
-                ) : (
-                  <button className="btn btn-secondary" disabled>
-                    Chưa sẵn sàng
-                  </button>
-                )}
+                <div style={{ display: 'flex', gap: '0.5rem', flexDirection: 'column', alignItems: 'flex-end' }}>
+                  {canRead ? (
+                    <Link to={`/books/${book.id}/chapters/${chapter.id}`} className="btn">
+                      <BookOpen size={16} /> Đọc
+                    </Link>
+                  ) : (
+                    <button className="btn btn-secondary" disabled>
+                      Chưa sẵn sàng
+                    </button>
+                  )}
+                  {['failed', 'done', 'partial'].includes(chapter.status) && book.canManage ? (
+                     <div style={{ display: 'flex', gap: '0.5rem' }}>
+                       {chapter.status === 'failed' && chapter.completedSegments < chapter.totalSegments ? (
+                          <button 
+                             className="btn" 
+                             style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', backgroundColor: 'var(--error)' }}
+                             onClick={() => retranslateMutation.mutate({ chapterId: chapter.id, retryFailedOnly: true })}
+                             disabled={retranslateMutation.isPending}
+                          >
+                             {retranslateMutation.isPending ? 'Đang gửi...' : 'Dịch lại lỗi'}
+                          </button>
+                       ) : null}
+                       <button 
+                          className="btn btn-secondary" 
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                          onClick={() => retranslateMutation.mutate({ chapterId: chapter.id, retryFailedOnly: false })}
+                          disabled={retranslateMutation.isPending}
+                       >
+                          Dịch lại tất cả
+                       </button>
+                     </div>
+                  ) : null}
+                </div>
               </article>
             );
           })}
