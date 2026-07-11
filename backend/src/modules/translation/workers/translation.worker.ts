@@ -569,6 +569,11 @@ export class TranslationWorker extends WorkerHost {
     const percent =
       totalChunks === 0 ? 0 : Math.floor((completedChunks / totalChunks) * 100);
 
+    await this.novelCacheService.invalidateBookAndChapterCaches(
+      chapter.bookId,
+      chapterId,
+    );
+
     this.eventEmitter.emit('chapter.progress', {
       bookId: chapter.bookId,
       chapterId,

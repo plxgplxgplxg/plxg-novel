@@ -14,7 +14,6 @@ import {
 const DEFAULT_ENDPOINT =
   'https://having-pharmaceuticals-chargers-transportation.trycloudflare.com/v1/chat/completions';
 const DEFAULT_MODEL = 'configured-literary-translation-model';
-const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_MAX_ATTEMPTS = 2;
 const CJK_CHARACTER_PATTERN = /[\u3400-\u9fff\uf900-\ufaff]/;
 
@@ -78,7 +77,6 @@ export class HFInferenceProvider implements ITranslationProvider {
         model: this.configService.get<string>('HF_MODEL', DEFAULT_MODEL),
         temperature: 0.1,
         top_p: 0.9,
-        max_tokens: this.resolveMaxTokens(),
         response_format: { type: 'json_object' },
         messages: [
           {
@@ -225,16 +223,4 @@ export class HFInferenceProvider implements ITranslationProvider {
     );
   }
 
-  private resolveMaxTokens(): number {
-    const configuredValue = Number.parseInt(
-      this.configService.get<string>('HF_MAX_TOKENS') ?? '',
-      10,
-    );
-
-    if (Number.isNaN(configuredValue)) {
-      return DEFAULT_MAX_TOKENS;
-    }
-
-    return Math.max(1024, configuredValue);
-  }
 }
