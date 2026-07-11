@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
 
-const TARGET_CHUNK_SIZE = 1800;
+const TARGET_CHUNK_SIZE = 800;
 const CONTEXT_TAIL_LENGTH = 280;
 
 export interface PlannedParagraph {
