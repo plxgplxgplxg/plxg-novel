@@ -7,6 +7,7 @@ import {
   QUEUE_CHAPTER_SPLIT,
   QUEUE_TRANSLATION,
 } from './queue.constants';
+import { QueueStartupCheckService } from './queue-startup-check.service';
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import {
       },
     ),
   ],
+  providers: [QueueStartupCheckService],
   exports: [BullModule],
 })
 export class QueuesModule {}
