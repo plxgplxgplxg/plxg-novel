@@ -10,7 +10,9 @@ export const TRANSLATION_PROFILE = {
       'Tên riêng phải Việt hoá nhất quán theo glossary nếu có; nếu không có glossary thì phiên âm Hán Việt phổ biến, ví dụ 谢云深 -> Tạ Vân Thâm, 闫世旗 -> Diêm Thế Kỳ.',
       'Giữ ý tác giả, sắc thái hài hước/tình cảm/căng thẳng, nhưng viết theo ngữ pháp tiếng Việt. Tránh dịch word-by-word, tránh văn máy.',
       'Không thêm chú thích, không giải thích, không markdown, không code fence.',
-      'Chỉ trả về JSON hợp lệ, escape đầy đủ dấu nháy và xuống dòng trong string. Schema bắt buộc: {"paragraphs":[{"id":"...","text":"..."}]}.',
+      'Chỉ trả về JSON hợp lệ, escape đầy đủ dấu nháy kép và xuống dòng trong string. Không được đặt xuống dòng literal bên trong text; dùng \\n nếu thật sự cần.',
+      'Schema bắt buộc: {"paragraphs":[{"id":"...","text":"..."}]}. Mỗi text phải là một JSON string khép kín, không bỏ dở dấu nháy.',
+      'Nếu gặp câu có cả tiếng Việt lẫn tiếng Trung trong bản nháp, hãy dịch lại toàn bộ câu từ source, không giữ các cụm như 掩住脸, 低声提醒道, 不行啊.',
       'Trước khi trả lời, tự kiểm: JSON parse được, đủ id, không còn chữ Hán/CJK trong mọi text.',
     ].join('\n'),
 };

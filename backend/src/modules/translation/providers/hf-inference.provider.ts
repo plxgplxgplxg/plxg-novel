@@ -14,8 +14,10 @@ import {
 const DEFAULT_ENDPOINT =
   'https://having-pharmaceuticals-chargers-transportation.trycloudflare.com/v1/chat/completions';
 const DEFAULT_MODEL = 'configured-literary-translation-model';
-const DEFAULT_MAX_ATTEMPTS = 2;
+const DEFAULT_MAX_ATTEMPTS = 3;
 const CJK_CHARACTER_PATTERN = /[\u3400-\u9fff\uf900-\ufaff]/;
+const INVALID_PARAGRAPH_IDS_PATTERN =
+  /(?:UNTRANSLATED_CJK|EMPTY_TRANSLATED_TEXT):([A-Za-z0-9_,:-]+)/;
 
 class InvalidProviderOutputError extends TranslationProviderError {
   constructor(
@@ -110,7 +112,12 @@ export class HFInferenceProvider implements ITranslationProvider {
           {
             role: 'user',
             content: JSON.stringify(
-              this.buildUserPayload(input, attempt, previousInvalidOutput),
+              this.buildUserPayload(
+                input,
+                attempt,
+                previousError,
+                previousInvalidOutput,
+              ),
             ),
           },
         ],
@@ -185,31 +192,66 @@ export class HFInferenceProvider implements ITranslationProvider {
       'Lần trả lời trước không hợp lệ.',
       `Lỗi cần sửa: ${errorMessage.substring(0, 500)}`,
       previousInvalidOutput
-        ? 'Hãy dùng previousAttemptOutput làm bản nháp chính để sửa lại cho chuẩn, giữ ý và văn phong đã dịch tốt, chỉ sửa phần sai.'
+        ? 'Hãy dùng previousAttemptOutput làm bản nháp tham khảo, nhưng các paragraph trong invalidParagraphIds hoặc còn chữ Hán/CJK phải dịch lại trực tiếp từ paragraphs source, không copy lại text lỗi.'
         : 'Hãy trả lời lại từ đầu.',
-      'Chỉ trả về JSON hợp lệ, dịch sạch toàn bộ chữ Trung sang tiếng Việt, không giữ chữ Hán/CJK trong text.',
+      'Bắt buộc trả đủ mọi id trong paragraphs, đúng thứ tự, không thiếu đoạn, không gộp đoạn.',
+      'Chỉ trả về đúng một JSON object parse được. Không markdown. Không xuống dòng literal bên trong string; nếu cần xuống dòng trong text thì dùng \\n. Escape mọi dấu nháy kép trong text.',
+      'Dịch sạch toàn bộ chữ Trung sang tiếng Việt. Không được giữ bất kỳ chữ Hán/CJK nào trong text.',
     ].join('\n');
   }
 
   private buildUserPayload(
     input: TranslationChunkRequest,
     attempt: number,
+    previousError: unknown,
     previousInvalidOutput: string | undefined,
   ): Record<string, unknown> {
+    const invalidParagraphIds = this.extractInvalidParagraphIds(
+      previousError,
+      attempt,
+    );
+
     return {
       contextBefore: input.contextBefore ?? '',
       glossary: input.glossary,
       paragraphs: input.paragraphs,
       ...(attempt > 1 && previousInvalidOutput
-        ? { previousAttemptOutput: previousInvalidOutput }
+        ? {
+            previousAttemptOutput: previousInvalidOutput,
+            invalidParagraphIds,
+            retryRules: [
+              'Return every source paragraph id exactly once and in source order.',
+              'For invalidParagraphIds, translate again from source paragraphs instead of copying previousAttemptOutput.',
+              'No CJK characters are allowed in any text field.',
+              'Return a single valid JSON object only.',
+            ],
+          }
         : {}),
     };
+  }
+
+  private extractInvalidParagraphIds(
+    previousError: unknown,
+    attempt: number,
+  ): string[] {
+    if (attempt <= 1 || !previousError) {
+      return [];
+    }
+
+    const errorMessage =
+      previousError instanceof Error ? previousError.message : String(previousError);
+    const match = errorMessage.match(INVALID_PARAGRAPH_IDS_PATTERN);
+    if (!match?.[1]) {
+      return [];
+    }
+
+    return match[1].split(',').filter(Boolean);
   }
 
   private parseProviderJson(rawContent: string): {
     paragraphs?: Array<{ id: string; text: string }>;
   } {
-    let jsonText = rawContent.trim();
+    let jsonText = this.extractJsonText(rawContent);
     if (jsonText.startsWith('```')) {
       jsonText = jsonText
         .replace(/^```(?:json)?\n?/i, '')
@@ -230,6 +272,23 @@ export class HFInferenceProvider implements ITranslationProvider {
         rawContent,
       );
     }
+  }
+
+  private extractJsonText(rawContent: string): string {
+    let jsonText = rawContent.trim();
+    const fenceMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenceMatch?.[1]) {
+      jsonText = fenceMatch[1].trim();
+    }
+
+    const firstBrace = jsonText.indexOf('{');
+    const lastBrace = jsonText.lastIndexOf('}');
+
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      return jsonText.slice(firstBrace, lastBrace + 1).trim();
+    }
+
+    return jsonText;
   }
 
   private assertParagraphContract(
@@ -272,16 +331,18 @@ export class HFInferenceProvider implements ITranslationProvider {
     paragraphs: Array<{ id: string; text: string }>,
     rawContent: string,
   ): void {
-    const leakedParagraph = paragraphs.find((paragraph) =>
+    const leakedParagraphs = paragraphs.filter((paragraph) =>
       CJK_CHARACTER_PATTERN.test(paragraph.text),
     );
 
-    if (!leakedParagraph) {
+    if (leakedParagraphs.length === 0) {
       return;
     }
 
     throw new InvalidProviderOutputError(
-      `UNTRANSLATED_CJK:${leakedParagraph.id}`,
+      `UNTRANSLATED_CJK:${leakedParagraphs
+        .map((paragraph) => paragraph.id)
+        .join(',')}`,
       rawContent,
     );
   }
