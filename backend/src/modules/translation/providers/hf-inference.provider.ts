@@ -35,6 +35,8 @@ export class HFInferenceProvider implements ITranslationProvider {
       body: JSON.stringify({
         model: this.configService.get<string>('HF_MODEL', DEFAULT_MODEL),
         temperature: 0.2,
+        max_tokens: 512,
+        response_format: { type: 'json_object' },
         messages: [
           {
             role: 'system',
@@ -74,14 +76,19 @@ export class HFInferenceProvider implements ITranslationProvider {
       throw new EmptyTranslationError();
     }
 
+    let jsonText = rawContent;
+    if (jsonText.startsWith('```')) {
+      jsonText = jsonText.replace(/^```(?:json)?\n?/i, '').replace(/```\s*$/, '').trim();
+    }
+
     let parsed: { paragraphs?: Array<{ id: string; text: string }> };
     try {
-      parsed = JSON.parse(rawContent) as {
+      parsed = JSON.parse(jsonText) as {
         paragraphs?: Array<{ id: string; text: string }>;
       };
     } catch (error) {
       throw new TranslationProviderError(
-        `INVALID_PROVIDER_JSON:${String(error)}`,
+        `INVALID_PROVIDER_JSON:${String(error)} | Raw: ${rawContent.substring(0, 500)}`,
       );
     }
 

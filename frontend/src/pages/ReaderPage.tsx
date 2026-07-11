@@ -159,7 +159,7 @@ const ReaderPage = () => {
                className="btn" 
                onClick={() => retranslateMutation.mutate(true)} 
                disabled={retranslateMutation.isPending}
-               style={{ padding: '0.25rem 0.75rem', fontSize: '0.875rem', backgroundColor: 'var(--error)' }}
+               style={{ padding: '0.25rem 0.75rem', fontSize: '0.875rem', backgroundColor: 'var(--color-danger)' }}
             >
                <RefreshCw size={14} className={retranslateMutation.isPending ? 'spin' : ''} />
                {retranslateMutation.isPending ? 'Đang yêu cầu...' : 'Dịch lại đoạn lỗi'}

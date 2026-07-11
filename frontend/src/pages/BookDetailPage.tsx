@@ -204,7 +204,7 @@ const BookDetailPage = () => {
                        {chapter.status === 'failed' && chapter.completedSegments < chapter.totalSegments ? (
                           <button 
                              className="btn" 
-                             style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', backgroundColor: 'var(--error)' }}
+                             style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', backgroundColor: 'var(--color-danger)' }}
                              onClick={() => retranslateMutation.mutate({ chapterId: chapter.id, retryFailedOnly: true })}
                              disabled={retranslateMutation.isPending}
                           >
