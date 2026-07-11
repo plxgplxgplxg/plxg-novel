@@ -1,5 +1,5 @@
 import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
-import { Job, Queue } from 'bullmq';
+import { DelayedError, Job, Queue } from 'bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Inject, Logger } from '@nestjs/common';
@@ -31,6 +31,7 @@ import {
 } from '../interfaces/translation-errors';
 import {
   BULLMQ_BACKOFF_CONFIG,
+  CHAPTER_ORDER_RETRY_DELAY_MS,
   MAX_RETRY_ATTEMPTS,
   QUEUE_TRANSLATION,
   TRANSLATION_WORKER_CONCURRENCY,
@@ -105,13 +106,14 @@ export class TranslationWorker extends WorkerHost {
       return;
     }
 
+    await this.delayUntilPreviousChaptersComplete(job, chapter);
+
     await this.ensureChapterJobsRunning(
       chapter.id,
       job.data.chapterJobId,
       revision,
     );
     const chunks = await this.prepareChunks(chapter, revision);
-    await this.emitProgress(chapter.id, revision);
 
     if (chunks.length === 0) {
       await this.failChapter(
@@ -339,11 +341,18 @@ export class TranslationWorker extends WorkerHost {
     revision: number,
     chapterJobId: string | undefined,
   ): Promise<void> {
-    const progress = await this.getChunkProgress(chapter.id, revision);
+    const chunks = await this.chunkRepo.find({
+      where: { chapterId: chapter.id, translationRevision: revision },
+      order: { chunkIndex: 'ASC' },
+    });
+    const progress = this.buildChunkProgress(chunks);
     if (progress.totalChunks === 0) {
       return;
     }
 
+    const failedChunks = getFailedChunkDiagnostics(chunks);
+    const { content: readableContent, readableChunkCount } =
+      buildReadableChunkContent(chunks);
     const percent = Math.floor(
       (progress.completedChunks / progress.totalChunks) * 100,
     );
@@ -355,6 +364,12 @@ export class TranslationWorker extends WorkerHost {
         totalSegments: progress.totalChunks,
         completedSegments: () =>
           `GREATEST("completedSegments", ${progress.completedChunks})`,
+        translatedContent: readableContent ?? '',
+        mergedMetadata: {
+          failedSegmentCount: failedChunks.length,
+          readableSegmentCount: readableChunkCount,
+          failedSegments: failedChunks,
+        },
       })
       .where('id = :chapterId', { chapterId: chapter.id })
       .andWhere('"translationRevision" = :revision', { revision })
@@ -395,6 +410,22 @@ export class TranslationWorker extends WorkerHost {
       percent,
       status: ChapterStatus.TRANSLATING,
     });
+  }
+
+  private buildChunkProgress(chunks: ChapterChunk[]): {
+    completedChunks: number;
+    failedChunks: number;
+    totalChunks: number;
+  } {
+    return {
+      completedChunks: chunks.filter(
+        (chunk) => chunk.status === ChapterChunkStatus.DONE,
+      ).length,
+      failedChunks: chunks.filter(
+        (chunk) => chunk.status === ChapterChunkStatus.FAILED,
+      ).length,
+      totalChunks: chunks.length,
+    };
   }
 
   private validateChunkResult(
@@ -550,6 +581,36 @@ export class TranslationWorker extends WorkerHost {
       progressPercent: 0,
       translationRevision,
     });
+  }
+
+  private async delayUntilPreviousChaptersComplete(
+    job: Job<TranslationJobPayload>,
+    chapter: Chapter,
+  ): Promise<void> {
+    const previousIncompleteChapter = await this.chapterRepo
+      .createQueryBuilder('chapter')
+      .select(['chapter.id', 'chapter.chapterNumber', 'chapter.status'])
+      .where('chapter.bookId = :bookId', { bookId: chapter.bookId })
+      .andWhere('chapter.chapterNumber < :chapterNumber', {
+        chapterNumber: chapter.chapterNumber,
+      })
+      .andWhere('chapter.status != :doneStatus', {
+        doneStatus: ChapterStatus.DONE,
+      })
+      .orderBy('chapter.chapterNumber', 'ASC')
+      .addOrderBy('chapter.createdAt', 'ASC')
+      .getOne();
+
+    if (!previousIncompleteChapter) {
+      return;
+    }
+
+    const delayUntil = Date.now() + CHAPTER_ORDER_RETRY_DELAY_MS;
+    await job.moveToDelayed(delayUntil, job.token);
+    this.logger.debug(
+      `Delay chapter translation chapterId=${chapter.id} waitingForChapterId=${previousIncompleteChapter.id}`,
+    );
+    throw new DelayedError();
   }
 
   private async emitProgress(

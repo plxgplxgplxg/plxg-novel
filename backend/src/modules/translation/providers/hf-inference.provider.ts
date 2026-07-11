@@ -17,6 +17,16 @@ const DEFAULT_MODEL = 'configured-literary-translation-model';
 const DEFAULT_MAX_ATTEMPTS = 2;
 const CJK_CHARACTER_PATTERN = /[\u3400-\u9fff\uf900-\ufaff]/;
 
+class InvalidProviderOutputError extends TranslationProviderError {
+  constructor(
+    message: string,
+    readonly rawContent: string,
+  ) {
+    super(message);
+    this.name = 'InvalidProviderOutputError';
+  }
+}
+
 @Injectable()
 export class HFInferenceProvider implements ITranslationProvider {
   private readonly logger = new Logger(HFInferenceProvider.name);
@@ -31,12 +41,21 @@ export class HFInferenceProvider implements ITranslationProvider {
     input: TranslationChunkRequest,
   ): Promise<TranslationChunkResult> {
     let lastError: unknown;
+    let previousInvalidOutput: string | undefined;
 
     for (let attempt = 1; attempt <= DEFAULT_MAX_ATTEMPTS; attempt += 1) {
       try {
-        return await this.translateChunkAttempt(input, attempt, lastError);
+        return await this.translateChunkAttempt(
+          input,
+          attempt,
+          lastError,
+          previousInvalidOutput,
+        );
       } catch (error) {
         lastError = error;
+        if (error instanceof InvalidProviderOutputError) {
+          previousInvalidOutput = error.rawContent;
+        }
         if (!this.shouldRetryProviderOutput(error, attempt)) {
           throw error;
         }
@@ -58,6 +77,7 @@ export class HFInferenceProvider implements ITranslationProvider {
     input: TranslationChunkRequest,
     attempt: number,
     previousError: unknown,
+    previousInvalidOutput: string | undefined,
   ): Promise<TranslationChunkResult> {
     const token = this.configService.get<string>('HF_TOKEN');
     const endpoint = this.getEndpoint();
@@ -81,15 +101,17 @@ export class HFInferenceProvider implements ITranslationProvider {
         messages: [
           {
             role: 'system',
-            content: this.buildSystemPrompt(input, previousError),
+            content: this.buildSystemPrompt(
+              input,
+              previousError,
+              previousInvalidOutput,
+            ),
           },
           {
             role: 'user',
-            content: JSON.stringify({
-              contextBefore: input.contextBefore ?? '',
-              glossary: input.glossary,
-              paragraphs: input.paragraphs,
-            }),
+            content: JSON.stringify(
+              this.buildUserPayload(input, attempt, previousInvalidOutput),
+            ),
           },
         ],
       }),
@@ -129,10 +151,11 @@ export class HFInferenceProvider implements ITranslationProvider {
     const parsed = this.parseProviderJson(rawContent);
 
     if (!parsed.paragraphs?.length) {
-      throw new EmptyTranslationError();
+      throw new InvalidProviderOutputError('EMPTY_PARAGRAPHS', rawContent);
     }
 
-    this.assertNoCjkInTranslation(parsed.paragraphs);
+    this.assertParagraphContract(input, parsed.paragraphs, rawContent);
+    this.assertNoCjkInTranslation(parsed.paragraphs, rawContent);
 
     return {
       paragraphs: parsed.paragraphs,
@@ -148,6 +171,7 @@ export class HFInferenceProvider implements ITranslationProvider {
   private buildSystemPrompt(
     input: TranslationChunkRequest,
     previousError: unknown,
+    previousInvalidOutput: string | undefined,
   ): string {
     if (!previousError) {
       return input.profile.instructions;
@@ -160,8 +184,26 @@ export class HFInferenceProvider implements ITranslationProvider {
       input.profile.instructions,
       'Lần trả lời trước không hợp lệ.',
       `Lỗi cần sửa: ${errorMessage.substring(0, 500)}`,
-      'Hãy trả lời lại từ đầu, chỉ JSON hợp lệ, dịch sạch toàn bộ chữ Trung sang tiếng Việt, không giữ chữ Hán/CJK trong text.',
+      previousInvalidOutput
+        ? 'Hãy dùng previousAttemptOutput làm bản nháp chính để sửa lại cho chuẩn, giữ ý và văn phong đã dịch tốt, chỉ sửa phần sai.'
+        : 'Hãy trả lời lại từ đầu.',
+      'Chỉ trả về JSON hợp lệ, dịch sạch toàn bộ chữ Trung sang tiếng Việt, không giữ chữ Hán/CJK trong text.',
     ].join('\n');
+  }
+
+  private buildUserPayload(
+    input: TranslationChunkRequest,
+    attempt: number,
+    previousInvalidOutput: string | undefined,
+  ): Record<string, unknown> {
+    return {
+      contextBefore: input.contextBefore ?? '',
+      glossary: input.glossary,
+      paragraphs: input.paragraphs,
+      ...(attempt > 1 && previousInvalidOutput
+        ? { previousAttemptOutput: previousInvalidOutput }
+        : {}),
+    };
   }
 
   private parseProviderJson(rawContent: string): {
@@ -180,17 +222,55 @@ export class HFInferenceProvider implements ITranslationProvider {
         paragraphs?: Array<{ id: string; text: string }>;
       };
     } catch (error) {
-      throw new TranslationProviderError(
+      throw new InvalidProviderOutputError(
         `INVALID_PROVIDER_JSON:${String(error)} | Raw: ${rawContent.substring(
           0,
           500,
         )}`,
+        rawContent,
+      );
+    }
+  }
+
+  private assertParagraphContract(
+    input: TranslationChunkRequest,
+    paragraphs: Array<{ id: string; text: string }>,
+    rawContent: string,
+  ): void {
+    const expectedParagraphIds = input.paragraphs.map(
+      (paragraph) => paragraph.id,
+    );
+    const actualParagraphIds = paragraphs.map((paragraph) => paragraph.id);
+
+    if (expectedParagraphIds.length !== actualParagraphIds.length) {
+      throw new InvalidProviderOutputError(
+        `INVALID_PARAGRAPH_COUNT:expected=${expectedParagraphIds.length}:actual=${actualParagraphIds.length}`,
+        rawContent,
+      );
+    }
+
+    if (expectedParagraphIds.join('|') !== actualParagraphIds.join('|')) {
+      throw new InvalidProviderOutputError(
+        'INVALID_PARAGRAPH_ORDER',
+        rawContent,
+      );
+    }
+
+    const emptyParagraph = paragraphs.find(
+      (paragraph) => !paragraph.text?.trim(),
+    );
+
+    if (emptyParagraph) {
+      throw new InvalidProviderOutputError(
+        `EMPTY_TRANSLATED_TEXT:${emptyParagraph.id}`,
+        rawContent,
       );
     }
   }
 
   private assertNoCjkInTranslation(
     paragraphs: Array<{ id: string; text: string }>,
+    rawContent: string,
   ): void {
     const leakedParagraph = paragraphs.find((paragraph) =>
       CJK_CHARACTER_PATTERN.test(paragraph.text),
@@ -200,8 +280,9 @@ export class HFInferenceProvider implements ITranslationProvider {
       return;
     }
 
-    throw new TranslationProviderError(
+    throw new InvalidProviderOutputError(
       `UNTRANSLATED_CJK:${leakedParagraph.id}`,
+      rawContent,
     );
   }
 
@@ -220,6 +301,10 @@ export class HFInferenceProvider implements ITranslationProvider {
 
     return (
       error.message.includes('INVALID_PROVIDER_JSON') ||
+      error.message.includes('EMPTY_PARAGRAPHS') ||
+      error.message.includes('INVALID_PARAGRAPH_COUNT') ||
+      error.message.includes('INVALID_PARAGRAPH_ORDER') ||
+      error.message.includes('EMPTY_TRANSLATED_TEXT') ||
       error.message.includes('UNTRANSLATED_CJK')
     );
   }
