@@ -60,10 +60,10 @@ export class TranslationJob {
   @Column({ default: 1, name: 'translation_revision' })
   translationRevision: number;
 
-  @Column({ nullable: true, name: 'error_code' })
+  @Column({ type: 'varchar', nullable: true, name: 'error_code' })
   errorCode: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'text', nullable: true })
   errorMessage: string | null;
 
   @CreateDateColumn()
